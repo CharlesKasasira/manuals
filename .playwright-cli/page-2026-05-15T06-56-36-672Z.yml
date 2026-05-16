@@ -1,0 +1,15 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e8]:
+        - heading "ManualFlow" [level=1] [ref=e9]
+        - paragraph [ref=e10]: Sign in to manage manuals.
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - text: Email
+        - textbox "Email" [ref=e13]: admin@manualflow.local
+      - generic [ref=e14]:
+        - text: Password
+        - textbox "Password" [ref=e15]: ManualFlow123!
+      - button "Sign in" [ref=e16] [cursor=pointer]

@@ -1,0 +1,24 @@
+{
+  "name": "manualflow",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Manuals professional project manuals platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @manualflow/web",
+    "dev:api": "npm run start:dev --workspace @manualflow/api",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "db:generate": "npm run prisma:generate --workspace @manualflow/api",
+    "db:migrate": "npm run prisma:migrate --workspace @manualflow/api",
+    "db:migrate:dev": "npm run prisma:migrate:dev --workspace @manualflow/api",
+    "db:seed": "npm run prisma:seed --workspace @manualflow/api"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}

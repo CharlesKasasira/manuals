@@ -1,0 +1,292 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --background: #f8fafc;
+  --foreground: #111827;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --surface-subtle: #f1f5f9;
+  --border: #e2e8f0;
+  --text-strong: #020617;
+  --text: #334155;
+  --text-muted: #64748b;
+  --text-soft: #94a3b8;
+  --brand-strong: #047857;
+  --brand-soft: #ecfdf5;
+  --brand-border: #a7f3d0;
+  --info-strong: #0369a1;
+  --info-soft: #f0f9ff;
+  --info-border: #bae6fd;
+  --danger-strong: #be123c;
+  --danger-soft: #fff1f2;
+  --danger-border: #fecdd3;
+  --warning-strong: #b45309;
+  --warning-soft: #fffbeb;
+  --warning-border: #fde68a;
+  --violet-strong: #6d28d9;
+  --violet-soft: #f5f3ff;
+  --violet-border: #ddd6fe;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0f172a;
+  --foreground: #e5e7eb;
+  --surface: #111827;
+  --surface-muted: #1e293b;
+  --surface-subtle: #273449;
+  --border: #334155;
+  --text-strong: #f8fafc;
+  --text: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-soft: #64748b;
+  --brand-strong: #6ee7b7;
+  --brand-soft: #06281f;
+  --brand-border: #047857;
+  --info-strong: #7dd3fc;
+  --info-soft: #082f49;
+  --info-border: #0369a1;
+  --danger-strong: #fda4af;
+  --danger-soft: #4c0519;
+  --danger-border: #be123c;
+  --warning-strong: #fcd34d;
+  --warning-soft: #451a03;
+  --warning-border: #b45309;
+  --violet-strong: #c4b5fd;
+  --violet-soft: #2e1065;
+  --violet-border: #7c3aed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+input,
+select,
+textarea,
+button {
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  background-color: var(--surface);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.manual-content h1,
+.manual-content h2,
+.manual-content h3,
+.manual-content h4 {
+  scroll-margin-top: 96px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.manual-content h1 {
+  font-size: 2rem;
+  margin: 0 0 1rem;
+}
+
+.manual-content h2 {
+  font-size: 1.35rem;
+  margin: 2rem 0 0.75rem;
+}
+
+.manual-content h3 {
+  font-size: 1.1rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.manual-content h4 {
+  font-size: 1rem;
+  margin: 1rem 0 0.4rem;
+}
+
+.manual-content p,
+.manual-content li {
+  color: #334155;
+  line-height: 1.75;
+}
+
+.manual-content ul,
+.manual-content ol {
+  padding-left: 1.4rem;
+}
+
+.manual-content code {
+  border-radius: 6px;
+  background: #f1f5f9;
+  padding: 0.1rem 0.35rem;
+}
+
+.field {
+  min-height: 2.5rem;
+  width: 100%;
+  border-radius: 0.375rem;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.field:focus {
+  border-color: #94a3b8;
+}
+
+html[data-theme="dark"] .manual-content h1,
+html[data-theme="dark"] .manual-content h2,
+html[data-theme="dark"] .manual-content h3,
+html[data-theme="dark"] .manual-content h4 {
+  color: var(--text-strong);
+}
+
+html[data-theme="dark"] .manual-content p,
+html[data-theme="dark"] .manual-content li {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .manual-content code {
+  background: var(--surface-subtle);
+  color: var(--text-strong);
+}
+
+html[data-theme="dark"] .bg-panel,
+html[data-theme="dark"] .bg-slate-50 {
+  background-color: var(--background);
+}
+
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] .bg-white\/95 {
+  background-color: var(--surface);
+}
+
+html[data-theme="dark"] .bg-slate-100 {
+  background-color: var(--surface-subtle);
+}
+
+html[data-theme="dark"] .border-line,
+html[data-theme="dark"] .border-slate-200 {
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .text-slate-950,
+html[data-theme="dark"] .text-slate-900,
+html[data-theme="dark"] .text-slate-800 {
+  color: var(--text-strong);
+}
+
+html[data-theme="dark"] .text-slate-700,
+html[data-theme="dark"] .text-slate-600 {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-400 {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .text-slate-50 {
+  color: #f8fafc;
+}
+
+html[data-theme="dark"] .hover\:bg-slate-50:hover,
+html[data-theme="dark"] .hover\:bg-slate-100:hover {
+  background-color: var(--surface-subtle);
+}
+
+html[data-theme="dark"] .hover\:text-slate-950:hover {
+  color: var(--text-strong);
+}
+
+html[data-theme="dark"] .hover\:border-emerald-300:hover,
+html[data-theme="dark"] .hover\:border-emerald-400:hover {
+  border-color: var(--brand-strong);
+}
+
+html[data-theme="dark"] .bg-emerald-50 {
+  background-color: var(--brand-soft);
+}
+
+html[data-theme="dark"] .border-emerald-200 {
+  border-color: var(--brand-border);
+}
+
+html[data-theme="dark"] .text-emerald-700,
+html[data-theme="dark"] .text-emerald-800 {
+  color: var(--brand-strong);
+}
+
+html[data-theme="dark"] .hover\:bg-emerald-50:hover {
+  background-color: var(--brand-soft);
+}
+
+html[data-theme="dark"] .hover\:text-emerald-700:hover,
+html[data-theme="dark"] .hover\:text-emerald-800:hover {
+  color: var(--brand-strong);
+}
+
+html[data-theme="dark"] .bg-sky-50 {
+  background-color: var(--info-soft);
+}
+
+html[data-theme="dark"] .border-sky-200 {
+  border-color: var(--info-border);
+}
+
+html[data-theme="dark"] .text-sky-700,
+html[data-theme="dark"] .text-sky-800 {
+  color: var(--info-strong);
+}
+
+html[data-theme="dark"] .bg-rose-50 {
+  background-color: var(--danger-soft);
+}
+
+html[data-theme="dark"] .border-rose-200 {
+  border-color: var(--danger-border);
+}
+
+html[data-theme="dark"] .text-rose-700 {
+  color: var(--danger-strong);
+}
+
+html[data-theme="dark"] .bg-amber-50 {
+  background-color: var(--warning-soft);
+}
+
+html[data-theme="dark"] .border-amber-200 {
+  border-color: var(--warning-border);
+}
+
+html[data-theme="dark"] .text-amber-700 {
+  color: var(--warning-strong);
+}
+
+html[data-theme="dark"] .bg-violet-50 {
+  background-color: var(--violet-soft);
+}
+
+html[data-theme="dark"] .border-violet-200 {
+  border-color: var(--violet-border);
+}
+
+html[data-theme="dark"] .text-violet-700 {
+  color: var(--violet-strong);
+}

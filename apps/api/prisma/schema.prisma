@@ -1,0 +1,412 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  user
+  manager
+  admin
+}
+
+enum ManualStatus {
+  draft
+  in_review
+  approved
+  published
+  archived
+}
+
+enum Visibility {
+  public
+  internal
+  private
+  restricted
+}
+
+enum ReviewState {
+  none
+  pending
+  changes_requested
+  approved
+}
+
+enum ReviewDecision {
+  submitted
+  approved
+  changes_requested
+}
+
+enum PermissionAction {
+  read
+  contribute
+  review
+  publish
+  administer
+}
+
+enum AssetKind {
+  image
+  document
+  config
+  diagram
+  video
+  other
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(user)
+  isActive     Boolean  @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedManuals       Manual[]          @relation("ManualOwner")
+  createdPages       ManualPage[]      @relation("PageCreator")
+  updatedPages       ManualPage[]      @relation("PageUpdater")
+  assets             Asset[]           @relation("AssetUploader")
+  feedback           Feedback[]
+  bookmarks          Bookmark[]
+  follows            Follow[]
+  auditLogs          AuditLog[]        @relation("AuditActor")
+  permissionGrants   PermissionGrant[]
+  teamMemberships    TeamMember[]
+  ownedTeams         Team[]            @relation("TeamOwner")
+  reviewRequestsFrom ReviewRequest[]   @relation("ReviewRequester")
+  reviewRequestsTo   ReviewRequest[]   @relation("ReviewReviewer")
+  createdApiKeys     ApiKey[]          @relation("ApiKeyCreator")
+  passwordResetTokens PasswordResetToken[]
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?  @db.Text
+  ownerId     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner       User?             @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  members     TeamMember[]
+  permissions PermissionGrant[]
+
+  @@index([isActive, name])
+}
+
+model TeamMember {
+  teamId    String
+  userId    String
+  role      String   @default("member")
+  createdAt DateTime @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@index([userId])
+}
+
+model Space {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?  @db.Text
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  manuals Manual[]
+}
+
+model Manual {
+  id                   String       @id @default(cuid())
+  title                String
+  slug                 String       @unique
+  description          String?      @db.Text
+  ownerId              String
+  spaceId              String
+  status               ManualStatus @default(draft)
+  visibility           Visibility   @default(internal)
+  version              Int          @default(1)
+  reviewState          ReviewState  @default(none)
+  publishedVersionId   String?
+  publishedAt          DateTime?
+  lastReviewedAt       DateTime?
+  nextReviewDueAt      DateTime?
+  archivedAt           DateTime?
+  deletedAt            DateTime?
+  viewCount            Int          @default(0)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  owner       User            @relation("ManualOwner", fields: [ownerId], references: [id])
+  space       Space           @relation(fields: [spaceId], references: [id])
+  pages       ManualPage[]
+  tags        ManualTag[]
+  assets      AssetUsage[]
+  feedback    Feedback[]
+  bookmarks   Bookmark[]
+  follows     Follow[]
+  versions    ManualVersion[]
+  reviews     ReviewRequest[]
+  permissions PermissionGrant[]
+
+  @@index([status, visibility, updatedAt])
+  @@index([spaceId, status])
+  @@fulltext([title, description])
+}
+
+model ManualPage {
+  id                  String       @id @default(cuid())
+  manualId            String
+  parentId            String?
+  title               String
+  slug                String
+  sortOrder           Int          @default(0)
+  status              ManualStatus @default(draft)
+  draftContentJson    Json?
+  draftContentHtml    String?      @db.LongText
+  draftMarkdown       String?      @db.LongText
+  publishedContentJson Json?
+  publishedContentHtml String?     @db.LongText
+  publishedMarkdown   String?      @db.LongText
+  contentPlain        String?      @db.LongText
+  createdById         String
+  updatedById         String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  manual      Manual       @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  parent      ManualPage?   @relation("PageTree", fields: [parentId], references: [id])
+  children    ManualPage[]  @relation("PageTree")
+  createdBy   User         @relation("PageCreator", fields: [createdById], references: [id])
+  updatedBy   User?        @relation("PageUpdater", fields: [updatedById], references: [id])
+  assetUsages AssetUsage[]
+
+  @@unique([manualId, slug])
+  @@index([manualId, parentId, sortOrder])
+  @@fulltext([title, contentPlain])
+}
+
+model Tag {
+  id        String      @id @default(cuid())
+  name      String      @unique
+  slug      String      @unique
+  color     String      @default("default")
+  manuals   ManualTag[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model ManualTag {
+  manualId String
+  tagId    String
+  manual   Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  tag      Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([manualId, tagId])
+}
+
+model Asset {
+  id           String     @id @default(cuid())
+  fileName     String
+  storagePath  String
+  mimeType     String?
+  sizeBytes    Int?
+  kind         AssetKind  @default(other)
+  visibility   Visibility @default(internal)
+  uploadedById String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  uploadedBy User?        @relation("AssetUploader", fields: [uploadedById], references: [id])
+  usages     AssetUsage[]
+
+  @@index([visibility, createdAt])
+  @@fulltext([fileName])
+}
+
+model AssetUsage {
+  id       String  @id @default(cuid())
+  assetId  String
+  manualId String?
+  pageId   String?
+  context  String?
+
+  asset  Asset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  manual Manual?     @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  page   ManualPage? @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@index([manualId])
+  @@index([pageId])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  manualId  String
+  userId    String?
+  isHelpful Boolean?
+  comment   String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  manual Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([manualId, createdAt])
+}
+
+model Bookmark {
+  userId    String
+  manualId  String
+  pageId    String?
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manual Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+
+  @@id([userId, manualId])
+}
+
+model Follow {
+  userId    String
+  manualId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manual Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+
+  @@id([userId, manualId])
+}
+
+model ManualVersion {
+  id          String   @id @default(cuid())
+  manualId    String
+  version     Int
+  snapshot    Json
+  publishedBy String?
+  createdAt   DateTime @default(now())
+
+  manual Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+
+  @@unique([manualId, version])
+}
+
+model ReviewRequest {
+  id            String         @id @default(cuid())
+  manualId      String
+  requestedById String
+  reviewerId    String?
+  decision      ReviewDecision @default(submitted)
+  comment       String?        @db.Text
+  createdAt     DateTime       @default(now())
+  decidedAt     DateTime?
+
+  manual      Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  requestedBy User   @relation("ReviewRequester", fields: [requestedById], references: [id])
+  reviewer    User?  @relation("ReviewReviewer", fields: [reviewerId], references: [id])
+}
+
+model PermissionGrant {
+  id        String           @id @default(cuid())
+  manualId  String
+  userId    String?
+  teamId    String?
+  role      Role?
+  action    PermissionAction
+  createdAt DateTime         @default(now())
+
+  manual Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team?  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([manualId, action])
+  @@index([userId, action])
+  @@index([teamId, action])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  event      String
+  actorId    String?
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([event, createdAt])
+  @@index([entityType, entityId])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  prefix      String    @unique
+  keyHash     String    @unique
+  role        Role      @default(user)
+  isActive    Boolean   @default(true)
+  createdById String?
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy User? @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, role])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model NotificationPreference {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  manualUpdates Boolean  @default(true)
+  reviewEvents  Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model NotificationOutbox {
+  id        String    @id @default(cuid())
+  userId    String?
+  event     String
+  payload   Json
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+}

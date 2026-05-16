@@ -1,0 +1,23 @@
+- main [ref=e2]:
+  - generic "Theme mode" [ref=e4]:
+    - button "Light" [ref=e5] [cursor=pointer]:
+      - img [ref=e6]
+    - button "Dark" [ref=e12] [cursor=pointer]:
+      - img [ref=e13]
+    - button "System" [pressed] [ref=e15] [cursor=pointer]:
+      - img [ref=e16]
+  - generic [ref=e18]:
+    - generic [ref=e19]:
+      - img [ref=e21]
+      - generic [ref=e23]:
+        - heading "Manuals" [level=1] [ref=e24]
+        - paragraph [ref=e25]: Sign in to manage manuals.
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - text: Email
+        - textbox "Email" [ref=e28]: admin@manualflow.local
+      - generic [ref=e29]:
+        - text: Password
+        - textbox "Password" [ref=e30]: Manuals123!
+      - button "Sign in" [ref=e31] [cursor=pointer]
+      - button "Forgot password?" [ref=e32] [cursor=pointer]
