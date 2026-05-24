@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/commo
 import { Role } from "@prisma/client";
 import { CurrentUser } from "../common/current-user.decorator";
 import { Roles } from "../common/roles.decorator";
-import { CreatePageDto, ReorderPagesDto, UpdatePageDto } from "./manuals.dto";
+import { CreatePageDto, PageAssignmentDto, PageCommentDto, ReorderPagesDto, UpdatePageCommentDto, UpdatePageDto } from "./manuals.dto";
 import { ManualsService } from "./manuals.service";
 
 @Controller()
@@ -30,6 +30,29 @@ export class PagesController {
   @Roles(Role.manager, Role.admin)
   async deletePage(@CurrentUser() user: any, @Param("id") id: string) {
     return { data: await this.manuals.deletePage(user, id) };
+  }
+
+  @Patch("pages/:id/assignment")
+  @Roles(Role.manager, Role.admin)
+  async assignPage(@CurrentUser() user: any, @Param("id") id: string, @Body() dto: PageAssignmentDto) {
+    return { data: await this.manuals.assignPage(user, id, dto) };
+  }
+
+  @Get("pages/:id/comments")
+  async comments(@CurrentUser() user: any, @Param("id") id: string) {
+    return { data: await this.manuals.pageComments(user, id) };
+  }
+
+  @Post("pages/:id/comments")
+  @Roles(Role.manager, Role.admin)
+  async createComment(@CurrentUser() user: any, @Param("id") id: string, @Body() dto: PageCommentDto) {
+    return { data: await this.manuals.createPageComment(user, id, dto) };
+  }
+
+  @Patch("pages/:id/comments/:commentId")
+  @Roles(Role.manager, Role.admin)
+  async updateComment(@CurrentUser() user: any, @Param("id") id: string, @Param("commentId") commentId: string, @Body() dto: UpdatePageCommentDto) {
+    return { data: await this.manuals.updatePageComment(user, id, commentId, dto) };
   }
 
   @Post("pages/:id/reorder")

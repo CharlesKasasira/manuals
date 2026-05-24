@@ -1,17 +1,22 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ManualStatus, Prisma, ReviewDecision, ReviewState, Role, Visibility } from "@prisma/client";
+import { ManualStatus, PageCommentKind, PageCommentStatus, PermissionAction, Prisma, ReviewDecision, ReviewState, Role, Visibility } from "@prisma/client";
+import { createHash, randomBytes } from "crypto";
 import { AuditService } from "../common/audit.service";
 import { MailService } from "../mail/mail.service";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   CreateManualDto,
+  CreateShareLinkDto,
   CreatePageDto,
   FeedbackDto,
   ListManualsDto,
+  PageAssignmentDto,
+  PageCommentDto,
   ReorderPagesDto,
   ReviewCommentDto,
   ShareManualEmailDto,
   UpdateManualDto,
+  UpdatePageCommentDto,
   UpdatePageDto
 } from "./manuals.dto";
 
@@ -21,7 +26,21 @@ const manualInclude = {
   owner: { select: { id: true, name: true, email: true, role: true } },
   space: true,
   tags: { include: { tag: true } },
-  pages: { orderBy: [{ parentId: "asc" as const }, { sortOrder: "asc" as const }, { title: "asc" as const }] },
+  pages: {
+    orderBy: [{ parentId: "asc" as const }, { sortOrder: "asc" as const }, { title: "asc" as const }],
+    include: {
+      assignedOwner: { select: { id: true, name: true, email: true, role: true } },
+      comments: {
+        include: {
+          author: { select: { id: true, name: true, email: true, role: true } },
+          assignedTo: { select: { id: true, name: true, email: true, role: true } },
+          resolvedBy: { select: { id: true, name: true, email: true, role: true } },
+          mentions: { include: { user: { select: { id: true, name: true, email: true, role: true } } } }
+        },
+        orderBy: [{ status: "asc" as const }, { createdAt: "desc" as const }]
+      }
+    }
+  },
   _count: { select: { feedback: true, follows: true, bookmarks: true } }
 };
 
@@ -67,7 +86,33 @@ export class ManualsService {
   }
 
   async publicList(filters: ListManualsDto = {}) {
-    return this.list(null, { ...filters, status: ManualStatus.published, visibility: Visibility.public });
+    const where: Prisma.ManualWhereInput = {
+      deletedAt: null,
+      status: ManualStatus.published,
+      visibility: Visibility.public
+    };
+
+    if (filters.space) where.space = { slug: filters.space };
+    if (filters.tag) {
+      where.tags = { some: { tag: { OR: [{ slug: filters.tag }, { name: { contains: filters.tag } }] } } };
+    }
+    if (filters.search) {
+      const q = filters.search;
+      where.OR = [
+        { title: { contains: q } },
+        { description: { contains: q } },
+        { pages: { some: { OR: [{ title: { contains: q } }, { contentPlain: { contains: q } }] } } },
+        { tags: { some: { tag: { OR: [{ name: { contains: q } }, { slug: { contains: q } }] } } } }
+      ];
+    }
+
+    const manuals = await this.prisma.manual.findMany({
+      where,
+      include: manualInclude,
+      orderBy: [{ updatedAt: "desc" }],
+      take: 100
+    });
+    return manuals.map((manual) => this.serializeManual(manual));
   }
 
   async getBySlug(actor: Actor, slug: string) {
@@ -149,6 +194,7 @@ export class ManualsService {
 
   async approve(actor: NonNullable<Actor>, id: string, dto: ReviewCommentDto) {
     this.assertManager(actor);
+    await this.requireManualWorkflowAccess(actor, id, [PermissionAction.review]);
     await this.prisma.$transaction([
       this.prisma.manual.update({ where: { id }, data: { status: ManualStatus.approved, reviewState: ReviewState.approved, lastReviewedAt: new Date() } }),
       this.prisma.reviewRequest.create({
@@ -161,6 +207,7 @@ export class ManualsService {
 
   async requestChanges(actor: NonNullable<Actor>, id: string, dto: ReviewCommentDto) {
     this.assertManager(actor);
+    await this.requireManualWorkflowAccess(actor, id, [PermissionAction.review]);
     await this.prisma.$transaction([
       this.prisma.manual.update({ where: { id }, data: { status: ManualStatus.draft, reviewState: ReviewState.changes_requested } }),
       this.prisma.reviewRequest.create({
@@ -172,6 +219,7 @@ export class ManualsService {
 
   async publish(actor: NonNullable<Actor>, id: string) {
     this.assertManager(actor);
+    await this.requireManualWorkflowAccess(actor, id, [PermissionAction.publish]);
     const manual = await this.prisma.manual.findUnique({ where: { id }, include: { pages: true } });
     if (!manual) throw new NotFoundException("Manual not found.");
     if (manual.status === ManualStatus.archived) throw new BadRequestException("Archived manuals cannot be published.");
@@ -310,6 +358,100 @@ export class ManualsService {
     return { ok: true };
   }
 
+  async assignPage(actor: NonNullable<Actor>, pageId: string, dto: PageAssignmentDto) {
+    const page = await this.prisma.manualPage.findUnique({ where: { id: pageId } });
+    if (!page) throw new NotFoundException("Page not found.");
+    await this.requireManualForWrite(actor, page.manualId);
+    if (dto.assignedOwnerId) await this.requireActiveUser(dto.assignedOwnerId);
+    const updated = await this.prisma.manualPage.update({
+      where: { id: pageId },
+      data: { assignedOwnerId: dto.assignedOwnerId || null },
+      include: { assignedOwner: { select: { id: true, name: true, email: true, role: true } } }
+    });
+    await this.audit.record({ event: "page_assigned", actorId: actor.id, entityType: "page", entityId: pageId, metadata: { assignedOwnerId: dto.assignedOwnerId || null } });
+    if (dto.assignedOwnerId) {
+      await this.prisma.notificationOutbox.create({
+        data: { userId: dto.assignedOwnerId, event: "page_assigned", payload: { manualId: page.manualId, pageId } }
+      });
+    }
+    return updated;
+  }
+
+  async pageComments(actor: NonNullable<Actor>, pageId: string) {
+    const page = await this.prisma.manualPage.findUnique({ where: { id: pageId } });
+    if (!page) throw new NotFoundException("Page not found.");
+    await this.requireManualReadable(actor, page.manualId);
+    return this.prisma.pageComment.findMany({
+      where: { pageId },
+      include: this.pageCommentInclude(),
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }]
+    });
+  }
+
+  async createPageComment(actor: NonNullable<Actor>, pageId: string, dto: PageCommentDto) {
+    const page = await this.prisma.manualPage.findUnique({ where: { id: pageId } });
+    if (!page) throw new NotFoundException("Page not found.");
+    await this.requireManualForWrite(actor, page.manualId);
+    const body = dto.body.trim();
+    if (!body) throw new BadRequestException("Comment body is required.");
+    if (dto.assignedToId) await this.requireActiveUser(dto.assignedToId);
+    const mentionUserIds = await this.validMentionUserIds(dto.mentionUserIds ?? []);
+    const comment = await this.prisma.pageComment.create({
+      data: {
+        pageId,
+        authorId: actor.id,
+        body,
+        kind: dto.kind ?? PageCommentKind.comment,
+        sectionAnchor: dto.sectionAnchor?.trim() || null,
+        assignedToId: dto.assignedToId || null,
+        mentions: mentionUserIds.length ? { create: mentionUserIds.map((userId) => ({ userId })) } : undefined
+      },
+      include: this.pageCommentInclude()
+    });
+    await this.audit.record({ event: "page_comment_created", actorId: actor.id, entityType: "page", entityId: pageId, metadata: { commentId: comment.id, kind: comment.kind } });
+    await this.enqueueCommentNotifications(page.manualId, pageId, comment.id, [dto.assignedToId, ...mentionUserIds].filter(Boolean) as string[]);
+    return comment;
+  }
+
+  async updatePageComment(actor: NonNullable<Actor>, pageId: string, commentId: string, dto: UpdatePageCommentDto) {
+    const comment = await this.prisma.pageComment.findUnique({ where: { id: commentId }, include: { page: true } });
+    if (!comment || comment.pageId !== pageId) throw new NotFoundException("Comment not found.");
+    await this.requireManualForWrite(actor, comment.page.manualId);
+    if (dto.assignedToId) await this.requireActiveUser(dto.assignedToId);
+    const resolving = dto.status === PageCommentStatus.resolved && comment.status !== PageCommentStatus.resolved;
+    const updated = await this.prisma.pageComment.update({
+      where: { id: commentId },
+      data: {
+        status: dto.status,
+        assignedToId: dto.assignedToId === undefined ? undefined : dto.assignedToId || null,
+        resolvedAt: resolving ? new Date() : dto.status === PageCommentStatus.open ? null : undefined,
+        resolvedById: resolving ? actor.id : dto.status === PageCommentStatus.open ? null : undefined
+      },
+      include: this.pageCommentInclude()
+    });
+    await this.audit.record({ event: "page_comment_updated", actorId: actor.id, entityType: "page_comment", entityId: commentId, metadata: { status: dto.status, assignedToId: dto.assignedToId } });
+    return updated;
+  }
+
+  async collaborators(actor: NonNullable<Actor>, manualId: string) {
+    const manual = await this.requireManualReadable(actor, manualId);
+    const users = await this.prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        isActive: true,
+        OR: [
+          { id: manual.ownerId },
+          { role: { in: [Role.manager, Role.admin] } },
+          { permissionGrants: { some: { manualId } } },
+          { teamMemberships: { some: { team: { permissions: { some: { manualId } } } } } }
+        ]
+      },
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: [{ role: "desc" }, { name: "asc" }]
+    });
+    return users;
+  }
+
   async feedback(actor: Actor, manualId: string, dto: FeedbackDto) {
     await this.requireManualReadable(actor, manualId);
     return this.prisma.feedback.create({
@@ -359,6 +501,42 @@ export class ManualsService {
     });
     await this.audit.record({ event: "manual_shared_email", actorId: actor.id, entityType: "manual", entityId: manualId, metadata: { recipientEmail: dto.recipientEmail } });
     return { ok: true };
+  }
+
+  async createShareLink(actor: NonNullable<Actor>, manualId: string, dto: CreateShareLinkDto) {
+    const manual = await this.requireManualReadable(actor, manualId);
+    const token = randomBytes(24).toString("base64url");
+    const expiresAt = new Date(Date.now() + (dto.expiresInDays ?? 7) * 86_400_000);
+    const link = await this.prisma.manualShareLink.create({
+      data: {
+        manualId,
+        tokenHash: this.shareTokenHash(token),
+        label: dto.label?.trim() || null,
+        createdById: actor.id,
+        expiresAt
+      },
+      select: { id: true, label: true, expiresAt: true, createdAt: true }
+    });
+    await this.audit.record({ event: "private_share_link_created", actorId: actor.id, entityType: "manual", entityId: manual.id, metadata: { linkId: link.id, expiresAt } });
+    return { ...link, token, url: this.mail.appUrl(`/share/${token}`) };
+  }
+
+  async getByShareToken(token: string) {
+    const shareLink = await this.prisma.manualShareLink.findUnique({
+      where: { tokenHash: this.shareTokenHash(token) },
+      include: { manual: { include: manualInclude } }
+    });
+    if (!shareLink || shareLink.revokedAt || shareLink.expiresAt.getTime() < Date.now() || shareLink.manual.deletedAt) {
+      throw new NotFoundException("Share link not found or expired.");
+    }
+    await this.prisma.manualShareLink.update({ where: { id: shareLink.id }, data: { lastUsedAt: new Date() } });
+    return this.serializeManual(shareLink.manual);
+  }
+
+  async offlinePack(actor: Actor, manualId: string, token?: string) {
+    const manual = token ? await this.getByShareToken(token) : await this.getById(actor, manualId);
+    if (!token) await this.requireManualReadable(actor, manualId);
+    return { fileName: `${this.slugify(manual.title)}-offline.html`, html: this.buildOfflineHtml(manual) };
   }
 
   async getById(actor: Actor, id: string) {
@@ -421,6 +599,27 @@ export class ManualsService {
     return manual;
   }
 
+  private async requireManualWorkflowAccess(actor: NonNullable<Actor>, manualId: string, actions: PermissionAction[]) {
+    const manual = await this.prisma.manual.findUnique({ where: { id: manualId } });
+    if (!manual || manual.deletedAt) throw new NotFoundException("Manual not found.");
+    if (actor.role === Role.admin || manual.ownerId === actor.id) return manual;
+
+    const allowedActions = Array.from(new Set([...actions, PermissionAction.administer]));
+    const permitted = await this.prisma.permissionGrant.findFirst({
+      where: {
+        manualId,
+        action: { in: allowedActions },
+        OR: [
+          { userId: actor.id },
+          { role: actor.role },
+          { team: { members: { some: { userId: actor.id } } } }
+        ]
+      }
+    });
+    if (!permitted) throw new ForbiddenException("You cannot perform this workflow action on this manual.");
+    return manual;
+  }
+
   async requireManualReadable(actor: Actor, manualId: string) {
     const manual = await this.prisma.manual.findFirst({ where: { id: manualId, ...this.readableManualWhere(actor) } });
     if (!manual) throw new NotFoundException("Manual not found.");
@@ -438,6 +637,43 @@ export class ManualsService {
       });
       await this.prisma.manualTag.create({ data: { manualId, tagId: tag.id } });
     }
+  }
+
+  private pageCommentInclude() {
+    return {
+      author: { select: { id: true, name: true, email: true, role: true } },
+      assignedTo: { select: { id: true, name: true, email: true, role: true } },
+      resolvedBy: { select: { id: true, name: true, email: true, role: true } },
+      mentions: { include: { user: { select: { id: true, name: true, email: true, role: true } } } }
+    };
+  }
+
+  private async requireActiveUser(userId: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, isActive: true, deletedAt: null }, select: { id: true } });
+    if (!user) throw new BadRequestException("Assigned user is not active.");
+    return user;
+  }
+
+  private async validMentionUserIds(userIds: string[]) {
+    const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+    if (!uniqueIds.length) return [];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: uniqueIds }, isActive: true, deletedAt: null },
+      select: { id: true }
+    });
+    return users.map((user) => user.id);
+  }
+
+  private async enqueueCommentNotifications(manualId: string, pageId: string, commentId: string, userIds: string[]) {
+    const uniqueIds = Array.from(new Set(userIds));
+    if (!uniqueIds.length) return;
+    await this.prisma.notificationOutbox.createMany({
+      data: uniqueIds.map((userId) => ({
+        userId,
+        event: "page_comment_mentioned",
+        payload: { manualId, pageId, commentId }
+      }))
+    });
   }
 
   serializeManual(manual: any) {
@@ -528,6 +764,46 @@ export class ManualsService {
 
   toPlainText(value: string) {
     return value.replace(/<[^>]*>/g, " ").replace(/[#*_`~>[\]()]/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  private shareTokenHash(token: string) {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
+  private buildOfflineHtml(manual: any) {
+    const pages = this.flattenPages(manual.tableOfContents ?? manual.pages ?? []);
+    const toc = pages.map((page: any) => `<li><a href="#page-${this.escapeHtml(page.slug)}">${this.escapeHtml(page.title)}</a></li>`).join("");
+    const sections = pages.map((page: any) => {
+      const body = page.publishedContentHtml || page.draftContentHtml || this.escapeHtml(page.publishedMarkdown || page.draftMarkdown || "No content yet.").replace(/\n/g, "<br>");
+      return `<section id="page-${this.escapeHtml(page.slug)}"><h2>${this.escapeHtml(page.title)}</h2>${body}</section>`;
+    }).join("\n");
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${this.escapeHtml(manual.title)} Offline Manual</title>
+  <style>
+    body{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;color:#0f172a;background:#f8fafc}
+    header{background:#0f172a;color:white;padding:32px}
+    main{max-width:1040px;margin:0 auto;padding:24px}
+    nav,section{background:white;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin-bottom:16px}
+    h1{margin:0;font-size:32px} h2{border-bottom:1px solid #e2e8f0;padding-bottom:8px}
+    p,li{line-height:1.7;color:#334155} a{color:#047857}
+    img,video,iframe{max-width:100%;height:auto}
+    pre{overflow:auto;background:#0f172a;color:#f8fafc;padding:16px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <header><p>ManualFlow Offline Pack</p><h1>${this.escapeHtml(manual.title)}</h1><p>${this.escapeHtml(manual.description || "")}</p></header>
+  <main><nav><strong>Contents</strong><ol>${toc}</ol></nav>${sections}</main>
+</body>
+</html>`;
+  }
+
+  private flattenPages(pages: any[] = []): any[] {
+    return pages.flatMap((page) => [page, ...this.flattenPages(page.children ?? [])]);
   }
 
   escapeHtml(value: string) {

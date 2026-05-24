@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
-import { ManualStatus, ReviewDecision, ReviewState, Role, Visibility } from "@prisma/client";
+import { ManualStatus, PermissionAction, ReviewDecision, ReviewState, Role, Visibility } from "@prisma/client";
 import { ManualsService } from "./manuals.service";
 
 describe("ManualsService", () => {
@@ -78,6 +78,51 @@ describe("ManualsService", () => {
     await expect(service.approve({ id: "user-1", role: Role.user }, manual.id, {})).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it("blocks a manager from approving a manual without manual-level review access", async () => {
+    const otherManual = { ...manual, id: "manual-2", ownerId: "owner-2" };
+    const { service, prisma, audit } = makeService({
+      manual: {
+        findUnique: jest.fn().mockResolvedValue(otherManual),
+        findFirst: jest.fn().mockResolvedValue(otherManual),
+        update: jest.fn().mockResolvedValue(otherManual),
+        findMany: jest.fn().mockResolvedValue([])
+      }
+    });
+
+    await expect(service.approve(actor, otherManual.id, {})).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.permissionGrant.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        manualId: otherManual.id,
+        action: { in: [PermissionAction.review, PermissionAction.administer] }
+      })
+    }));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it("blocks a manager from requesting changes without manual-level review access", async () => {
+    const otherManual = { ...manual, id: "manual-2", ownerId: "owner-2" };
+    const { service, prisma } = makeService({
+      manual: {
+        findUnique: jest.fn().mockResolvedValue(otherManual),
+        findFirst: jest.fn().mockResolvedValue(otherManual),
+        update: jest.fn().mockResolvedValue(otherManual),
+        findMany: jest.fn().mockResolvedValue([])
+      }
+    });
+
+    await expect(service.requestChanges(actor, otherManual.id, {})).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.permissionGrant.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        manualId: otherManual.id,
+        action: { in: [PermissionAction.review, PermissionAction.administer] }
+      })
+    }));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("publishes pages, bumps version, writes a snapshot, and enqueues notification", async () => {
     const page = {
       id: "page-1",
@@ -119,6 +164,31 @@ describe("ManualsService", () => {
       data: { event: "manual_published", payload: { manualId: manual.id, version: 2 } }
     });
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ event: "manual_published" }));
+  });
+
+  it("blocks a manager from publishing a manual without manual-level publish access", async () => {
+    const otherManual = { ...manual, id: "manual-2", ownerId: "owner-2", status: ManualStatus.approved };
+    const { service, prisma, audit } = makeService({
+      manual: {
+        findUnique: jest.fn().mockResolvedValue(otherManual),
+        findFirst: jest.fn().mockResolvedValue(otherManual),
+        update: jest.fn().mockResolvedValue(otherManual),
+        findMany: jest.fn().mockResolvedValue([])
+      }
+    });
+
+    await expect(service.publish(actor, otherManual.id)).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.permissionGrant.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        manualId: otherManual.id,
+        action: { in: [PermissionAction.publish, PermissionAction.administer] }
+      })
+    }));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.manualVersion.create).not.toHaveBeenCalled();
+    expect(prisma.notificationOutbox.create).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it("rejects publishing an already published manual with no unpublished changes", async () => {
@@ -163,6 +233,33 @@ describe("ManualsService", () => {
     expect(prisma.manual.findFirst).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: manual.id, deletedAt: null })
     });
+  });
+
+  it("lists every published public manual for the public library", async () => {
+    const manuals = [
+      { ...manual, id: "manual-1", title: "Network Manual", slug: "network-manual", status: ManualStatus.published, visibility: Visibility.public },
+      { ...manual, id: "manual-2", title: "Policy Manual", slug: "policy-manual", status: ManualStatus.published, visibility: Visibility.public }
+    ];
+    const { service, prisma } = makeService({
+      manual: {
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        findMany: jest.fn().mockResolvedValue(manuals),
+        update: jest.fn(),
+        create: jest.fn()
+      }
+    });
+
+    const result = await service.publicList();
+
+    expect(result).toHaveLength(2);
+    expect(prisma.manual.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        deletedAt: null,
+        status: ManualStatus.published,
+        visibility: Visibility.public
+      }
+    }));
   });
 
   it("serializes manual knowledge health signals", () => {

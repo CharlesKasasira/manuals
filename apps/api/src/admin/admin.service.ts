@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
 import { PermissionAction, Role } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
@@ -9,7 +11,7 @@ import { AddTeamMemberDto, CreateApiKeyDto, CreatePermissionDto, CreateTeamDto, 
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly mail: MailService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly mail: MailService, private readonly jwt: JwtService, private readonly config: ConfigService) {}
 
   async overview() {
     const [users, teams, spaces, permissions, auditLogs, notifications, manuals] = await Promise.all([
@@ -110,6 +112,21 @@ export class AdminService {
     await this.prisma.user.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
     await this.audit.record({ event: "user_updated", actorId, entityType: "user", entityId: id, metadata: { deleted: true } });
     return { ok: true };
+  }
+
+  async impersonateUser(actorId: string, id: string) {
+    if (actorId === id) throw new BadRequestException("You are already signed in as this user.");
+    const user = await this.prisma.user.findFirst({
+      where: { id, isActive: true, deletedAt: null },
+      select: { id: true, email: true, name: true, role: true }
+    });
+    if (!user) throw new BadRequestException("User is not active.");
+    const token = await this.jwt.signAsync(
+      { sub: user.id, role: user.role, impersonatedBy: actorId },
+      { secret: this.config.get<string>("JWT_SECRET", "manualflow-dev-secret"), expiresIn: "2h" }
+    );
+    await this.audit.record({ event: "user_impersonated", actorId, entityType: "user", entityId: user.id, metadata: { email: user.email, role: user.role } });
+    return { token, user };
   }
 
   teams() {
@@ -232,6 +249,7 @@ export class AdminService {
         lastUsedAt: true,
         expiresAt: true,
         revokedAt: true,
+        rateLimitPerMinute: true,
         createdAt: true,
         createdBy: { select: { id: true, name: true, email: true } }
       },
@@ -259,6 +277,7 @@ export class AdminService {
         keyHash: this.hashApiKey(key),
         role: dto.role ?? Role.user,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+        rateLimitPerMinute: dto.rateLimitPerMinute ?? 60,
         createdById: actorId
       },
       select: {
@@ -270,11 +289,12 @@ export class AdminService {
         lastUsedAt: true,
         expiresAt: true,
         revokedAt: true,
+        rateLimitPerMinute: true,
         createdAt: true,
         createdBy: { select: { id: true, name: true, email: true } }
       }
     });
-    await this.audit.record({ event: "api_key_created", actorId, entityType: "api_key", entityId: apiKey.id, metadata: { name: apiKey.name, role: apiKey.role } });
+    await this.audit.record({ event: "api_key_created", actorId, entityType: "api_key", entityId: apiKey.id, metadata: { name: apiKey.name, role: apiKey.role, rateLimitPerMinute: apiKey.rateLimitPerMinute } });
     return { ...apiKey, key };
   }
 
@@ -282,7 +302,7 @@ export class AdminService {
     const apiKey = await this.prisma.apiKey.update({
       where: { id },
       data: { isActive: false, revokedAt: new Date() },
-      select: { id: true, name: true, prefix: true, role: true, isActive: true, lastUsedAt: true, expiresAt: true, revokedAt: true, createdAt: true }
+      select: { id: true, name: true, prefix: true, role: true, isActive: true, rateLimitPerMinute: true, lastUsedAt: true, expiresAt: true, revokedAt: true, createdAt: true }
     });
     await this.audit.record({ event: "api_key_revoked", actorId, entityType: "api_key", entityId: id, metadata: { name: apiKey.name } });
     return apiKey;
@@ -292,7 +312,7 @@ export class AdminService {
     const apiKey = await this.prisma.apiKey.update({
       where: { id },
       data: { isActive: true, revokedAt: null },
-      select: { id: true, name: true, prefix: true, role: true, isActive: true, lastUsedAt: true, expiresAt: true, revokedAt: true, createdAt: true }
+      select: { id: true, name: true, prefix: true, role: true, isActive: true, rateLimitPerMinute: true, lastUsedAt: true, expiresAt: true, revokedAt: true, createdAt: true }
     });
     await this.audit.record({ event: "api_key_activated", actorId, entityType: "api_key", entityId: id, metadata: { name: apiKey.name } });
     return apiKey;

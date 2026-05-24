@@ -17,6 +17,7 @@ export function AuthManuals() {
   const [spaceId, setSpaceId] = useState("");
   const [visibility, setVisibility] = useState("internal");
   const statusParam = searchParams.get("status") ?? "all";
+  const queryParam = searchParams.get("q") ?? "";
   const initialStatus = ["all", "draft", "in_review", "approved", "published", "archived"].includes(statusParam) ? statusParam : "all";
   const manuals = useQuery({
     queryKey: ["manuals"],
@@ -70,7 +71,7 @@ export function AuthManuals() {
       ) : manuals.isError ? (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">Sign in or start the API to load manuals.</div>
       ) : (
-        <ManualBrowser manuals={manuals.data ?? []} hrefPrefix="/app/manuals" initialStatus={initialStatus} />
+        <ManualBrowser manuals={manuals.data ?? []} hrefPrefix="/app/manuals" initialStatus={initialStatus} initialQuery={queryParam} />
       )}
     </div>
   );

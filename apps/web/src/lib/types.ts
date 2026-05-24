@@ -2,6 +2,33 @@ export type Role = "user" | "manager" | "admin";
 export type ManualStatus = "draft" | "in_review" | "approved" | "published" | "archived";
 export type Visibility = "public" | "internal" | "private" | "restricted";
 export type PermissionAction = "read" | "contribute" | "review" | "publish" | "administer";
+export type PageCommentKind = "comment" | "reviewer_note" | "change_request";
+export type PageCommentStatus = "open" | "resolved";
+
+export type Collaborator = {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+};
+
+export type PageComment = {
+  id: string;
+  pageId: string;
+  authorId: string;
+  assignedToId?: string | null;
+  kind: PageCommentKind;
+  status: PageCommentStatus;
+  sectionAnchor?: string | null;
+  body: string;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  author?: Collaborator;
+  assignedTo?: Collaborator | null;
+  resolvedBy?: Collaborator | null;
+  mentions?: Array<{ user: Collaborator }>;
+};
 
 export type ManualPage = {
   id: string;
@@ -15,6 +42,9 @@ export type ManualPage = {
   draftMarkdown?: string | null;
   publishedContentHtml?: string | null;
   draftContentHtml?: string | null;
+  assignedOwnerId?: string | null;
+  assignedOwner?: Collaborator | null;
+  comments?: PageComment[];
   children?: ManualPage[];
   updatedAt?: string;
 };
@@ -70,6 +100,8 @@ export type Asset = {
   sizeBytes?: number | null;
   kind: "image" | "document" | "config" | "diagram" | "video" | "other";
   visibility: Visibility;
+  scanStatus?: "pending" | "clean" | "flagged" | "failed";
+  scanDetails?: Record<string, unknown> | null;
   createdAt: string;
   uploadedBy?: { id: string; name: string; email: string } | null;
   usages?: Array<{ id: string; manualId?: string | null; pageId?: string | null; context?: string | null }>;
@@ -99,6 +131,50 @@ export type ManualAnalytics = {
   helpful: number;
   bookmarks: number;
   follows: number;
+};
+
+export type SearchFacet = {
+  value: string;
+  label: string;
+  count: number;
+};
+
+export type SearchMatchedPage = {
+  id: string;
+  title: string;
+  slug: string;
+  snippet: string;
+  score: number;
+};
+
+export type SearchManual = Manual & {
+  type: "manual";
+  matchedPages: SearchMatchedPage[];
+  rank: {
+    score: number;
+    reasons: string[];
+  };
+};
+
+export type SearchAsset = Asset & {
+  type: "asset";
+  snippet: string;
+  rank: {
+    score: number;
+    reasons: string[];
+  };
+};
+
+export type SearchResponse = {
+  query: string;
+  manuals: SearchManual[];
+  assets: SearchAsset[];
+  facets: {
+    spaces: SearchFacet[];
+    tags: SearchFacet[];
+    visibility: SearchFacet[];
+    types: SearchFacet[];
+  };
 };
 
 export type AdminOverview = {
@@ -173,6 +249,7 @@ export type ApiKey = {
   prefix: string;
   role: Role;
   isActive: boolean;
+  rateLimitPerMinute?: number;
   createdAt: string;
   lastUsedAt?: string | null;
   expiresAt?: string | null;

@@ -45,6 +45,11 @@ export class AdminController {
     return this.wrap(this.admin.activateUser(actor.id, id));
   }
 
+  @Post("users/:id/impersonate")
+  impersonateUser(@CurrentUser() actor: any, @Param("id") id: string) {
+    return this.wrap(this.admin.impersonateUser(actor.id, id));
+  }
+
   @Delete("users/:id")
   deleteUser(@CurrentUser() actor: any, @Param("id") id: string) {
     return this.wrap(this.admin.deleteUser(actor.id, id));

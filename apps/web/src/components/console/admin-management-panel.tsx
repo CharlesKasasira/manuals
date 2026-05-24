@@ -1,18 +1,24 @@
 "use client";
 
 import type React from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Mail, Plus, Power, PowerOff, Send, Trash2, UserCheck, UserX, Users } from "lucide-react";
+import { Check, Copy, Filter, KeyRound, Mail, Plus, Power, PowerOff, Send, ShieldCheck, Trash2, UserCheck, UserCog, UserX, Users } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { api } from "@/lib/api";
+import { api, setToken } from "@/lib/api";
 import type { AdminOverview, AdminUser, ApiKey, PermissionAction, Role, Team } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
-type Tab = "users" | "teams" | "permissions" | "api-keys" | "mail";
+type Tab = "users" | "teams" | "permissions" | "api-keys" | "mail" | "audit";
 type RunAction = (action: () => Promise<unknown>, success: string) => Promise<unknown>;
+const adminTabs: Tab[] = ["users", "teams", "permissions", "api-keys", "mail", "audit"];
+
+function isAdminTab(value: string | null): value is Tab {
+  return adminTabs.includes(value as Tab);
+}
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md border border-dashed border-line bg-slate-50 p-5 text-sm text-slate-500">{children}</div>;
@@ -23,7 +29,9 @@ function ErrorState({ children }: { children: React.ReactNode }) {
 }
 
 export function AdminManagementPanel() {
-  const [tab, setTab] = useState<Tab>("users");
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState<Tab>(isAdminTab(requestedTab) ? requestedTab : "users");
   const [message, setMessage] = useState("");
   const overview = useQuery({
     queryKey: ["admin", "overview"],
@@ -33,6 +41,10 @@ export function AdminManagementPanel() {
 
   const data = overview.data;
   const activeUsers = data?.users.filter((user) => user.isActive).length ?? 0;
+
+  useEffect(() => {
+    if (isAdminTab(requestedTab)) setTab(requestedTab);
+  }, [requestedTab]);
 
   async function run(action: () => Promise<unknown>, success: string) {
     setMessage("");
@@ -64,11 +76,11 @@ export function AdminManagementPanel() {
         <Metric label="Active users" value={activeUsers} icon={Users} />
         <Metric label="Teams" value={data.teams.length} icon={UserCheck} />
         <Metric label="API keys" value={data.apiAccess.keys.length} icon={KeyRound} />
-        <Metric label="Mail status" value={data.mailSettings.enabled ? "Enabled" : "Off"} icon={Mail} />
+        <Metric label="Audit events" value={data.auditLogs.length} icon={ShieldCheck} />
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(["users", "teams", "permissions", "api-keys", "mail"] as const).map((item) => (
+        {adminTabs.map((item) => (
           <button
             key={item}
             onClick={() => setTab(item)}
@@ -84,6 +96,7 @@ export function AdminManagementPanel() {
       {tab === "permissions" ? <PermissionsAdmin data={data} run={run} /> : null}
       {tab === "api-keys" ? <ApiKeysAdmin data={data} run={run} /> : null}
       {tab === "mail" ? <MailAdmin data={data} run={run} /> : null}
+      {tab === "audit" ? <AuditAdmin data={data} /> : null}
     </div>
   );
 }
@@ -105,6 +118,8 @@ function Metric({ label, value, icon: Icon }: { label: string; value: string | n
 function UsersAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "user" as Role, isActive: true });
+  const [filter, setFilter] = useState("");
+  const filteredUsers = data.users.filter((user) => [user.name, user.email, user.role, user.isActive ? "active" : "inactive"].some((value) => value.toLowerCase().includes(filter.toLowerCase())));
 
   function startCreate() {
     setEditing(null);
@@ -124,6 +139,13 @@ function UsersAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
       editing ? "User updated." : "User created."
     );
     startCreate();
+  }
+
+  async function impersonate(user: AdminUser) {
+    const response = await run(() => api<{ data: { token: string } }>(`/admin/users/${user.id}/impersonate`, { method: "POST" }), `Switching to ${user.name}.`) as { data: { token: string } } | undefined;
+    if (!response?.data.token) return;
+    setToken(response.data.token);
+    window.location.href = "/app";
   }
 
   return (
@@ -153,10 +175,18 @@ function UsersAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
       </Card>
 
       <Card>
-        <CardHeader><div className="flex items-center justify-between"><span className="text-sm font-semibold">Users</span><span className="text-xs text-slate-500">{data.users.length} total</span></div></CardHeader>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm font-semibold">Users</span>
+            <label className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+              <input value={filter} onChange={(event) => setFilter(event.target.value)} className="h-9 rounded-md border border-line bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-slate-400" placeholder="Filter users" />
+            </label>
+          </div>
+        </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-line">
-            {data.users.map((user) => (
+            {filteredUsers.length ? filteredUsers.map((user) => (
               <div key={user.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_120px_110px_auto] lg:items-center">
                 <div>
                   <p className="font-semibold text-slate-950">{user.name}</p>
@@ -170,10 +200,11 @@ function UsersAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
                   <Button variant="secondary" onClick={() => run(() => api(`/admin/users/${user.id}/${user.isActive ? "deactivate" : "activate"}`, { method: "POST" }), user.isActive ? "User deactivated." : "User activated.")}>
                     {user.isActive ? <UserX size={15} /> : <UserCheck size={15} />}
                   </Button>
+                  <Button variant="secondary" onClick={() => confirm(`Switch session to ${user.name}?`) && impersonate(user)} disabled={!user.isActive}><UserCog size={15} /></Button>
                   <Button variant="danger" onClick={() => confirm("Delete this user?") && run(() => api(`/admin/users/${user.id}`, { method: "DELETE" }), "User deleted.")}><Trash2 size={15} /></Button>
                 </div>
               </div>
-            ))}
+            )) : <div className="p-4"><EmptyState>No users match this filter.</EmptyState></div>}
           </div>
         </CardContent>
       </Card>
@@ -332,6 +363,27 @@ function PermissionsAdmin({ data, run }: { data: AdminOverview; run: RunAction }
       <Card>
         <CardHeader><div className="text-sm font-semibold">Permission grants</div></CardHeader>
         <CardContent className="space-y-2">
+          <div className="overflow-x-auto rounded-md border border-line">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Manual</th>
+                  {data.permissionActions.map((action) => <th key={action} className="px-3 py-2">{action}</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {data.manuals.slice(0, 8).map((manual) => (
+                  <tr key={manual.id}>
+                    <td className="px-3 py-2 font-semibold text-slate-900">{manual.title}</td>
+                    {data.permissionActions.map((action) => {
+                      const grants = data.permissions.filter((permission) => permission.manual?.id === manual.id && permission.action === action);
+                      return <td key={action} className="px-3 py-2 text-xs text-slate-600">{grants.length ? grants.map((grant) => grant.team?.name ?? grant.user?.email ?? grant.role).join(", ") : "-"}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {data.permissions.length ? data.permissions.map((permission) => (
             <div key={permission.id} className="grid gap-3 rounded-md border border-line p-3 lg:grid-cols-[minmax(0,1fr)_120px_auto] lg:items-center">
               <div>
@@ -349,7 +401,7 @@ function PermissionsAdmin({ data, run }: { data: AdminOverview; run: RunAction }
 }
 
 function ApiKeysAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
-  const [form, setForm] = useState({ name: "", role: "user" as Role, expiresAt: "" });
+  const [form, setForm] = useState({ name: "", role: "user" as Role, expiresAt: "", rateLimitPerMinute: 60 });
   const [createdKey, setCreatedKey] = useState<ApiKey | null>(null);
   const [copied, setCopied] = useState(false);
   const access = data.apiAccess;
@@ -359,13 +411,13 @@ function ApiKeysAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
     const response = await run(
       () => api<{ data: ApiKey }>("/admin/api-keys", {
         method: "POST",
-        body: JSON.stringify({ name: form.name, role: form.role, expiresAt: form.expiresAt || undefined })
+        body: JSON.stringify({ name: form.name, role: form.role, expiresAt: form.expiresAt || undefined, rateLimitPerMinute: Number(form.rateLimitPerMinute) })
       }),
       "API key created."
     ) as { data: ApiKey } | undefined;
     if (!response?.data) return;
     setCreatedKey(response.data);
-    setForm({ name: "", role: "user", expiresAt: "" });
+    setForm({ name: "", role: "user", expiresAt: "", rateLimitPerMinute: 60 });
     setCopied(false);
   }
 
@@ -429,6 +481,9 @@ function ApiKeysAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
               <Field label="Expires">
                 <input type="date" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} className="field" />
               </Field>
+              <Field label="Rate limit / minute">
+                <input type="number" min={1} max={10000} value={form.rateLimitPerMinute} onChange={(e) => setForm({ ...form, rateLimitPerMinute: Number(e.target.value) })} className="field" />
+              </Field>
               <Button type="submit"><KeyRound size={16} />Create key</Button>
             </form>
           </CardContent>
@@ -439,7 +494,7 @@ function ApiKeysAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
           <CardContent className="p-0">
             <div className="divide-y divide-line">
               {access.keys.length ? access.keys.map((key) => (
-                <div key={key.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_110px_130px_130px_auto] lg:items-center">
+                <div key={key.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_110px_130px_130px_120px_auto] lg:items-center">
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-950">{key.name}</p>
                     <p className="mt-1 text-sm text-slate-500">{key.prefix}... / created by {key.createdBy?.name ?? "Unknown"}</p>
@@ -450,6 +505,7 @@ function ApiKeysAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
                     <p>Last: {formatDate(key.lastUsedAt)}</p>
                     <p>Expires: {formatDate(key.expiresAt)}</p>
                   </div>
+                  <span className="text-sm font-semibold text-slate-700">{key.rateLimitPerMinute ?? 60}/min</span>
                   <Button
                     variant={key.isActive ? "danger" : "secondary"}
                     onClick={() => run(() => api(`/admin/api-keys/${key.id}/${key.isActive ? "revoke" : "activate"}`, { method: "POST" }), key.isActive ? "API key revoked." : "API key activated.")}
@@ -563,6 +619,51 @@ function MailAdmin({ data, run }: { data: AdminOverview; run: RunAction }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function AuditAdmin({ data }: { data: AdminOverview }) {
+  const [eventFilter, setEventFilter] = useState("all");
+  const [actorFilter, setActorFilter] = useState("");
+  const eventTypes = Array.from(new Set(data.auditLogs.map((log) => log.event))).sort();
+  const filteredLogs = data.auditLogs.filter((log) => {
+    const matchesEvent = eventFilter === "all" || log.event === eventFilter;
+    const actorText = `${log.actor?.name ?? "System"} ${log.actor?.email ?? ""}`.toLowerCase();
+    const matchesActor = !actorFilter.trim() || actorText.includes(actorFilter.toLowerCase());
+    return matchesEvent && matchesActor;
+  });
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <ShieldCheck size={17} /> Audit events
+          </div>
+          <span className="rounded-full border border-line bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">{filteredLogs.length} shown</span>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-[220px_minmax(0,1fr)]">
+          <select value={eventFilter} onChange={(event) => setEventFilter(event.target.value)} className="field">
+            <option value="all">All events</option>
+            {eventTypes.map((event) => <option key={event} value={event}>{event.replaceAll("_", " ")}</option>)}
+          </select>
+          <input value={actorFilter} onChange={(event) => setActorFilter(event.target.value)} className="field" placeholder="Filter by actor" />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y divide-line">
+          {filteredLogs.length ? filteredLogs.map((log) => (
+            <div key={log.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_160px_140px] lg:items-center">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-950">{log.event.replaceAll("_", " ")}</p>
+                <p className="mt-1 text-sm text-slate-500">{log.entityType || "system"}{log.entityId ? ` / ${log.entityId}` : ""}</p>
+              </div>
+              <p className="text-sm text-slate-600">{log.actor?.name ?? "System"}</p>
+              <p className="text-sm text-slate-500">{formatDate(log.createdAt)}</p>
+            </div>
+          )) : <div className="p-4"><EmptyState>No audit events match these filters.</EmptyState></div>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

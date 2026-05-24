@@ -1,5 +1,5 @@
-import { ManualStatus, Visibility } from "@prisma/client";
-import { IsArray, IsEmail, IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
+import { ManualStatus, PageCommentKind, PageCommentStatus, Visibility } from "@prisma/client";
+import { IsArray, IsEmail, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 
 export class ListManualsDto {
   @IsOptional()
@@ -141,4 +141,53 @@ export class ShareManualEmailDto {
   @IsOptional()
   @IsString()
   message?: string;
+}
+
+export class PageAssignmentDto {
+  @IsOptional()
+  @IsString()
+  assignedOwnerId?: string | null;
+}
+
+export class PageCommentDto {
+  @IsString()
+  body!: string;
+
+  @IsOptional()
+  @IsEnum(PageCommentKind)
+  kind?: PageCommentKind;
+
+  @IsOptional()
+  @IsString()
+  sectionAnchor?: string | null;
+
+  @IsOptional()
+  @IsString()
+  assignedToId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  mentionUserIds?: string[];
+}
+
+export class UpdatePageCommentDto {
+  @IsOptional()
+  @IsEnum(PageCommentStatus)
+  status?: PageCommentStatus;
+
+  @IsOptional()
+  @IsString()
+  assignedToId?: string | null;
+}
+
+export class CreateShareLinkDto {
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  expiresInDays?: number;
 }

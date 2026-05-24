@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { AssetKind, Prisma, Role, Visibility } from "@prisma/client";
+import { AssetKind, AssetScanStatus, Prisma, Role, Visibility } from "@prisma/client";
 import { createReadStream, mkdirSync } from "node:fs";
 import { AuditService } from "../common/audit.service";
 import { ManualsService } from "../manuals/manuals.service";
@@ -42,8 +42,9 @@ export class AssetsService {
         uploadedById: user.id
       }
     });
+    await this.scanAsset(asset.id, file);
     await this.audit.record({ event: "asset_uploaded", actorId: user.id, entityType: "asset", entityId: asset.id });
-    return asset;
+    return this.prisma.asset.findUnique({ where: { id: asset.id } });
   }
 
   async download(user: Actor, id: string) {
@@ -130,5 +131,33 @@ export class AssetsService {
 
   assertManager(user: Actor): asserts user is NonNullable<Actor> {
     if (!user || (user.role !== Role.admin && user.role !== Role.manager)) throw new ForbiddenException("Manager or admin access required.");
+  }
+
+  async scanAsset(assetId: string, file: Express.Multer.File) {
+    const webhookUrl = this.config.get<string>("ASSET_SCAN_WEBHOOK_URL");
+    if (!webhookUrl) {
+      await this.prisma.asset.update({
+        where: { id: assetId },
+        data: { scanStatus: AssetScanStatus.clean, scanDetails: { provider: "local-hook", verdict: "skipped", reason: "ASSET_SCAN_WEBHOOK_URL not configured" } }
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetId, fileName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size, storagePath: file.path })
+      });
+      const details = await response.json().catch(() => ({ status: response.status }));
+      const verdict = String(details.verdict ?? details.status ?? "").toLowerCase();
+      const scanStatus = verdict.includes("flag") || verdict.includes("infect") || verdict.includes("malware") ? AssetScanStatus.flagged : AssetScanStatus.clean;
+      await this.prisma.asset.update({ where: { id: assetId }, data: { scanStatus, scanDetails: details as Prisma.InputJsonValue } });
+    } catch (error) {
+      await this.prisma.asset.update({
+        where: { id: assetId },
+        data: { scanStatus: AssetScanStatus.failed, scanDetails: { provider: "webhook", error: error instanceof Error ? error.message : "Scan failed" } }
+      });
+    }
   }
 }

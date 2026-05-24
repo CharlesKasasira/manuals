@@ -58,6 +58,24 @@ enum AssetKind {
   other
 }
 
+enum AssetScanStatus {
+  pending
+  clean
+  flagged
+  failed
+}
+
+enum PageCommentKind {
+  comment
+  reviewer_note
+  change_request
+}
+
+enum PageCommentStatus {
+  open
+  resolved
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -72,6 +90,11 @@ model User {
   ownedManuals       Manual[]          @relation("ManualOwner")
   createdPages       ManualPage[]      @relation("PageCreator")
   updatedPages       ManualPage[]      @relation("PageUpdater")
+  assignedPages      ManualPage[]      @relation("PageAssignee")
+  authoredPageComments PageComment[]   @relation("PageCommentAuthor")
+  assignedPageComments PageComment[]   @relation("PageCommentAssignee")
+  resolvedPageComments PageComment[]   @relation("PageCommentResolver")
+  pageCommentMentions PageCommentMention[]
   assets             Asset[]           @relation("AssetUploader")
   feedback           Feedback[]
   bookmarks          Bookmark[]
@@ -83,6 +106,7 @@ model User {
   reviewRequestsFrom ReviewRequest[]   @relation("ReviewRequester")
   reviewRequestsTo   ReviewRequest[]   @relation("ReviewReviewer")
   createdApiKeys     ApiKey[]          @relation("ApiKeyCreator")
+  createdShareLinks  ManualShareLink[] @relation("ShareLinkCreator")
   passwordResetTokens PasswordResetToken[]
 }
 
@@ -161,6 +185,7 @@ model Manual {
   versions    ManualVersion[]
   reviews     ReviewRequest[]
   permissions PermissionGrant[]
+  shareLinks  ManualShareLink[]
 
   @@index([status, visibility, updatedAt])
   @@index([spaceId, status])
@@ -184,6 +209,7 @@ model ManualPage {
   contentPlain        String?      @db.LongText
   createdById         String
   updatedById         String?
+  assignedOwnerId     String?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
@@ -192,11 +218,50 @@ model ManualPage {
   children    ManualPage[]  @relation("PageTree")
   createdBy   User         @relation("PageCreator", fields: [createdById], references: [id])
   updatedBy   User?        @relation("PageUpdater", fields: [updatedById], references: [id])
+  assignedOwner User?       @relation("PageAssignee", fields: [assignedOwnerId], references: [id], onDelete: SetNull)
   assetUsages AssetUsage[]
+  comments    PageComment[]
 
   @@unique([manualId, slug])
   @@index([manualId, parentId, sortOrder])
+  @@index([assignedOwnerId])
   @@fulltext([title, contentPlain])
+}
+
+model PageComment {
+  id           String            @id @default(cuid())
+  pageId       String
+  authorId     String
+  assignedToId String?
+  kind         PageCommentKind   @default(comment)
+  status       PageCommentStatus @default(open)
+  sectionAnchor String?
+  body         String            @db.Text
+  resolvedAt   DateTime?
+  resolvedById String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  page       ManualPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  author     User       @relation("PageCommentAuthor", fields: [authorId], references: [id])
+  assignedTo User?      @relation("PageCommentAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  resolvedBy User?      @relation("PageCommentResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  mentions   PageCommentMention[]
+
+  @@index([pageId, status, createdAt])
+  @@index([assignedToId, status])
+}
+
+model PageCommentMention {
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  comment PageComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId])
 }
 
 model Tag {
@@ -226,6 +291,8 @@ model Asset {
   sizeBytes    Int?
   kind         AssetKind  @default(other)
   visibility   Visibility @default(internal)
+  scanStatus   AssetScanStatus @default(pending)
+  scanDetails  Json?
   uploadedById String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -319,6 +386,24 @@ model ReviewRequest {
   reviewer    User?  @relation("ReviewReviewer", fields: [reviewerId], references: [id])
 }
 
+model ManualShareLink {
+  id          String    @id @default(cuid())
+  manualId    String
+  tokenHash   String    @unique
+  label       String?
+  createdById String?
+  expiresAt   DateTime
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  manual    Manual @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("ShareLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([manualId, expiresAt])
+  @@index([revokedAt, expiresAt])
+}
+
 model PermissionGrant {
   id        String           @id @default(cuid())
   manualId  String
@@ -360,6 +445,7 @@ model ApiKey {
   keyHash     String    @unique
   role        Role      @default(user)
   isActive    Boolean   @default(true)
+  rateLimitPerMinute Int @default(60)
   createdById String?
   lastUsedAt  DateTime?
   expiresAt   DateTime?

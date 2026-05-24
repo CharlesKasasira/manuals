@@ -8,6 +8,8 @@ import { IS_PUBLIC_KEY } from "./public.decorator";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
+  private readonly apiKeyHits = new Map<string, { windowStart: number; count: number }>();
+
   constructor(
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
@@ -27,13 +29,14 @@ export class JwtAuthGuard implements CanActivate {
     if (apiKey) {
       const user = await this.userForApiKey(apiKey);
       if (user) {
+        if (!this.withinApiKeyRateLimit(user.apiKeyId, user.rateLimitPerMinute)) return false;
         request.user = user;
         return true;
       }
       return Boolean(isPublic);
     }
 
-    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+    const token = header.startsWith("Bearer ") ? header.slice(7) : this.extractCookieToken(request.headers.cookie);
     if (!token) return Boolean(isPublic);
 
     try {
@@ -66,6 +69,14 @@ export class JwtAuthGuard implements CanActivate {
     return null;
   }
 
+  extractCookieToken(cookieHeader?: string) {
+    if (!cookieHeader) return null;
+    const cookies = cookieHeader.split(";").map((part) => part.trim());
+    const tokenCookie = cookies.find((part) => part.startsWith("manualflow.token="));
+    if (!tokenCookie) return null;
+    return decodeURIComponent(tokenCookie.slice("manualflow.token=".length));
+  }
+
   async userForApiKey(key: string) {
     const setting = await this.prisma.systemSetting.findUnique({ where: { key: "apiAccess.enabled" } });
     const enabled = Boolean(setting?.value && typeof setting.value === "object" && "enabled" in setting.value && (setting.value as { enabled?: unknown }).enabled === true);
@@ -83,6 +94,7 @@ export class JwtAuthGuard implements CanActivate {
         id: true,
         name: true,
         role: true,
+        rateLimitPerMinute: true,
         createdBy: { select: { id: true, email: true, isActive: true, deletedAt: true } }
       }
     });
@@ -96,7 +108,20 @@ export class JwtAuthGuard implements CanActivate {
       name: apiKey.name,
       role: apiKey.role,
       isActive: true,
-      apiKeyId: apiKey.id
+      apiKeyId: apiKey.id,
+      rateLimitPerMinute: apiKey.rateLimitPerMinute
     };
+  }
+
+  withinApiKeyRateLimit(apiKeyId: string, limit = 60) {
+    const now = Date.now();
+    const current = this.apiKeyHits.get(apiKeyId);
+    if (!current || now - current.windowStart >= 60_000) {
+      this.apiKeyHits.set(apiKeyId, { windowStart: now, count: 1 });
+      return true;
+    }
+    if (current.count >= limit) return false;
+    current.count += 1;
+    return true;
   }
 }

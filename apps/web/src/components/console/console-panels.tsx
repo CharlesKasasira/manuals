@@ -63,7 +63,7 @@ export function DashboardPanel() {
     { label: "Published manuals", value: String(published), icon: BookOpen, href: "/app/manuals?status=published", action: "View published" },
     { label: "Drafts in progress", value: String(drafts), icon: ClipboardCheck, href: "/app/manuals?status=draft", action: "View drafts" },
     { label: "Manual views", value: String(views), icon: Eye, href: "/app/analytics", action: "Open analytics" },
-    { label: "Audit events", value: audit.data ? String(audit.data.length) : "Restricted", icon: ShieldCheck, href: "#recent-audit", action: "View audit" }
+    { label: "Audit events", value: audit.data ? String(audit.data.length) : "Restricted", icon: ShieldCheck, href: "/app/admin?tab=audit", action: "View audit" }
   ];
 
   if (manuals.isLoading) return <EmptyState>Loading dashboard data...</EmptyState>;
@@ -355,12 +355,13 @@ export function AssetsPanel() {
         <CardContent className="p-0">
           <div className="divide-y divide-line">
             {data.length ? data.map((asset) => (
-              <div key={asset.id} className="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_120px_130px_120px_auto] lg:items-center">
+              <div key={asset.id} className="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_120px_120px_130px_120px_auto] lg:items-center">
                 <div>
                   <p className="font-semibold text-slate-950">{asset.fileName}</p>
                   <p className="mt-1 text-sm text-slate-500">{asset.mimeType || asset.kind} / {asset.uploadedBy?.name ?? "Unknown uploader"}</p>
                 </div>
                 <Badge value={asset.visibility} />
+                <Badge value={asset.scanStatus ?? "pending"} />
                 <span className="text-sm text-slate-600">{formatBytes(asset.sizeBytes ?? 0)}</span>
                 <span className="text-sm text-slate-500">{formatDate(asset.createdAt)}</span>
                 <div className="flex gap-2">

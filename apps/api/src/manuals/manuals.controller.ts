@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { Role } from "@prisma/client";
 import { CurrentUser } from "../common/current-user.decorator";
 import { Public } from "../common/public.decorator";
 import { Roles } from "../common/roles.decorator";
-import { CreateManualDto, FeedbackDto, ListManualsDto, ReviewCommentDto, ShareManualEmailDto, UpdateManualDto } from "./manuals.dto";
+import { CreateManualDto, CreateShareLinkDto, FeedbackDto, ListManualsDto, ReviewCommentDto, ShareManualEmailDto, UpdateManualDto } from "./manuals.dto";
 import { ManualsService } from "./manuals.service";
 
 @Controller("manuals")
@@ -92,5 +93,23 @@ export class ManualsController {
   @Post(":id/share-email")
   async shareEmail(@CurrentUser() user: any, @Param("id") id: string, @Body() dto: ShareManualEmailDto) {
     return { data: await this.manuals.shareEmail(user, id, dto) };
+  }
+
+  @Post(":id/share-links")
+  async createShareLink(@CurrentUser() user: any, @Param("id") id: string, @Body() dto: CreateShareLinkDto) {
+    return { data: await this.manuals.createShareLink(user, id, dto) };
+  }
+
+  @Get(":id/offline-pack")
+  async offlinePack(@CurrentUser() user: any, @Param("id") id: string, @Res() res: Response) {
+    const pack = await this.manuals.offlinePack(user, id);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${pack.fileName}"`);
+    res.send(pack.html);
+  }
+
+  @Get(":id/collaborators")
+  async collaborators(@CurrentUser() user: any, @Param("id") id: string) {
+    return { data: await this.manuals.collaborators(user, id) };
   }
 }

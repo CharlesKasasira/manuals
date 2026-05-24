@@ -115,6 +115,12 @@ export class CreateApiKeyDto {
   @IsOptional()
   @IsDateString()
   expiresAt?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10000)
+  rateLimitPerMinute?: number;
 }
 
 export class MailSettingsDto {
