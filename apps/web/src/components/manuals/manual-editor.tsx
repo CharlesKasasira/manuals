@@ -37,7 +37,6 @@ import {
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { API_URL, api } from "@/lib/api";
 import { highlightCode, htmlToText, markdownToHtml, sanitizeRichHtml, videoEmbedUrl } from "@/lib/manual-content";
 import type { Collaborator, Manual, ManualPage, PageComment, PageCommentKind, Visibility } from "@/lib/types";
@@ -639,6 +638,38 @@ export function ManualEditor({ slug }: { slug: string }) {
         </aside>
       </div>
     </div>
+  );
+}
+
+function CollapsiblePanel({
+  title,
+  icon,
+  badge,
+  defaultOpen = false,
+  children
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  badge?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-lg border border-line bg-white shadow-sm" open={defaultOpen}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-slate-950 [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 items-center gap-2">
+          {icon}
+          <span className="truncate">{title}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {badge ? <span className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">{badge}</span> : null}
+          <span className="text-xs font-bold text-slate-400 transition group-open:rotate-90">&gt;</span>
+        </span>
+      </summary>
+      <div className="border-t border-line p-4">
+        {children}
+      </div>
+    </details>
   );
 }
 

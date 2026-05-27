@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronLeft, ChevronRight, Copy, FileDown, Printer, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { headingsFromMarkdown, headingsFromRichHtml, htmlToText, pageMarkdown, pageRichHtml, richHtmlWithHeadingIds, slugify } from "@/lib/manual-content";
+import { htmlToText, pageMarkdown, pageRichHtml, richHtmlWithHeadingIds, slugify } from "@/lib/manual-content";
 import { Manual, ManualPage } from "@/lib/types";
 import { formatDate, humanizeStatus } from "@/lib/utils";
 import { ManualShareActions } from "./manual-share-actions";
@@ -75,11 +75,6 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
     if (!normalizedQuery) return pages;
     return pages.filter((page) => pageText(page).toLowerCase().includes(normalizedQuery));
   }, [normalizedQuery, pages]);
-  const pageHeadings = pages.flatMap((page) => {
-    const richHtml = pageRichHtml(page);
-    const headings = richHtml ? headingsFromRichHtml(richHtml) : headingsFromMarkdown(pageMarkdown(page));
-    return headings.map((heading) => ({ ...heading, pageSlug: page.slug, pageTitle: page.title }));
-  });
   const readerHref = app ? `/app/manuals/${manual.slug}/reader` : `/manuals/${manual.slug}`;
   const signals = manual.knowledgeSignals;
   const readingMinutes = signals?.readingTimeMinutes ?? Math.max(1, Math.ceil(pages.reduce((total, page) => total + pageText(page).split(/\s+/).filter(Boolean).length, 0) / 220));
@@ -143,7 +138,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
   }
 
   return (
-    <div className="reader-shell grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)_250px]">
+    <div className="reader-shell grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
       <div className="fixed inset-x-0 top-0 z-40 h-1 bg-transparent print:hidden" aria-hidden="true">
         <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${progress}%` }} />
       </div>
@@ -176,17 +171,20 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
       </aside>
       <article className="reader-article min-w-0 rounded-lg border border-line bg-white shadow-sm">
         <div className="border-b border-line p-6">
-          <nav className="mb-4 flex flex-wrap items-center gap-2 text-sm text-slate-500" aria-label="Breadcrumb">
-            <Link href={app ? "/app/manuals" : "/manuals"} className="hover:text-emerald-700">Manuals</Link>
-            <span>/</span>
-            {manual.space?.name ? (
-              <>
-                <span>{manual.space.name}</span>
-                <span>/</span>
-              </>
-            ) : null}
-            <span className="font-semibold text-slate-800">{manual.title}</span>
-          </nav>
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <nav className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-500" aria-label="Breadcrumb">
+              <Link href={app ? "/app/manuals" : "/manuals"} className="hover:text-emerald-700">Manuals</Link>
+              <span>/</span>
+              {manual.space?.name ? (
+                <>
+                  <span>{manual.space.name}</span>
+                  <span>/</span>
+                </>
+              ) : null}
+              <span className="font-semibold text-slate-800">{manual.title}</span>
+            </nav>
+            <ManualShareActions manualId={manual.id} compact />
+          </div>
           <div className="flex flex-wrap gap-2">
             <Badge value={manual.status} />
             <Badge value={manual.visibility} />
@@ -234,19 +232,18 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
                 <p className="text-xs uppercase text-slate-500">Reading time</p>
                 <p className="mt-1 text-sm font-semibold text-slate-900">{readingMinutes} min</p>
               </div>
-              <div className="rounded-lg border border-line bg-white p-3">
-                <p className="text-xs uppercase text-slate-500">Quality</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">{signals.qualityScore}%</p>
-              </div>
+              {typeof signals.qualityScore === "number" ? (
+                <div className="rounded-lg border border-line bg-white p-3">
+                  <p className="text-xs uppercase text-slate-500">Quality</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{signals.qualityScore}%</p>
+                </div>
+              ) : null}
               <div className="rounded-lg border border-line bg-white p-3">
                 <p className="text-xs uppercase text-slate-500">Review</p>
                 <p className="mt-1 text-sm font-semibold capitalize text-slate-900">{humanizeStatus(signals.reviewDueStatus)}</p>
               </div>
             </div>
           ) : null}
-          <div className="mt-4 xl:hidden">
-            <ManualShareActions manualId={manual.id} />
-          </div>
         </div>
         {visiblePages.length ? visiblePages.map((page) => <PageSection key={page.id} page={page} onCopy={handleCopy} />) : pages.length ? (
           <div className="manual-content p-6">
@@ -262,32 +259,6 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
           <span>Version {manual.version}</span>
         </footer>
       </article>
-      <aside className="hidden xl:block">
-        <div className="reader-sidebar sticky top-24 space-y-4">
-          <ManualShareActions manualId={manual.id} />
-          <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
-            <p className="mb-3 text-xs font-bold uppercase tracking-[0.22em] text-sky-700">On this page</p>
-            <nav className="space-y-1">
-              {pageHeadings.slice(0, 24).map((heading) => (
-                <div key={`${heading.pageSlug}-${heading.id}`} className="group flex items-center gap-1 rounded-md hover:bg-slate-100">
-                  <a href={`#${heading.pageSlug}-${heading.id}`} className="min-w-0 flex-1 px-3 py-2 text-sm text-slate-600">
-                    {heading.title}
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(`#${heading.pageSlug}-${heading.id}`)}
-                    className="mr-1 hidden h-7 w-7 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-white hover:text-slate-700 group-hover:inline-flex"
-                    title="Copy section link"
-                    aria-label={`Copy link to ${heading.title}`}
-                  >
-                    <Copy size={13} />
-                  </button>
-                </div>
-              ))}
-            </nav>
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }

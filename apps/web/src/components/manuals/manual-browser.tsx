@@ -111,7 +111,7 @@ export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus 
         case "views":
           return (b.viewCount ?? 0) - (a.viewCount ?? 0);
         case "quality":
-          return (b.knowledgeSignals?.qualityScore ?? 0) - (a.knowledgeSignals?.qualityScore ?? 0);
+          return (b.knowledgeSignals?.qualityScore ?? -1) - (a.knowledgeSignals?.qualityScore ?? -1);
         default:
           return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
       }
@@ -122,7 +122,8 @@ export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus 
   const tags = useMemo(() => Array.from(new Map(manuals.flatMap((manual) => manual.tags ?? []).map((item) => [item.slug, item])).values()), [manuals]);
   const searchFacets = search.data?.facets;
   const signals = manuals.map((manual) => manual.knowledgeSignals).filter(Boolean);
-  const averageQuality = signals.length ? Math.round(signals.reduce((total, item) => total + item!.qualityScore, 0) / signals.length) : 0;
+  const qualityScores = signals.map((item) => item?.qualityScore).filter((score): score is number => typeof score === "number");
+  const averageQuality = qualityScores.length ? Math.round(qualityScores.reduce((total, score) => total + score, 0) / qualityScores.length) : null;
   const overdueReviews = signals.filter((item) => item?.reviewDueStatus === "overdue").length;
   const hasSearchError = usingSearchEndpoint && search.isError;
   const resultCount = usingSearchEndpoint && !hasSearchError ? searchManuals.length : filtered.length;
@@ -179,7 +180,7 @@ export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus 
             <option value="updated">Recently updated</option>
             <option value="title">Title</option>
             <option value="views">Most viewed</option>
-            <option value="quality">Quality score</option>
+            {qualityScores.length ? <option value="quality">Quality score</option> : null}
           </select>
         </div>
         {recentSearches.length ? (
@@ -220,10 +221,12 @@ export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus 
           <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-950"><BookOpenCheck size={16} />Knowledge health</div>
             <dl className="mt-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <dt className="text-slate-500">Average quality</dt>
-                <dd className="font-semibold text-slate-900">{averageQuality}%</dd>
-              </div>
+              {averageQuality !== null ? (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500">Average quality</dt>
+                  <dd className="font-semibold text-slate-900">{averageQuality}%</dd>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <dt className="text-slate-500">Review overdue</dt>
                 <dd className="font-semibold text-slate-900">{overdueReviews}</dd>

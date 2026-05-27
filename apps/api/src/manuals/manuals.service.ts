@@ -26,6 +26,13 @@ const manualInclude = {
   owner: { select: { id: true, name: true, email: true, role: true } },
   space: true,
   tags: { include: { tag: true } },
+  permissions: {
+    select: {
+      userId: true,
+      role: true,
+      team: { select: { members: { select: { userId: true } } } }
+    }
+  },
   pages: {
     orderBy: [{ parentId: "asc" as const }, { sortOrder: "asc" as const }, { title: "asc" as const }],
     include: {
@@ -82,7 +89,7 @@ export class ManualsService {
       orderBy: [{ updatedAt: "desc" }],
       take: 100
     });
-    return manuals.map((manual) => this.serializeManual(manual));
+    return manuals.map((manual) => this.serializeManual(manual, actor));
   }
 
   async publicList(filters: ListManualsDto = {}) {
@@ -112,7 +119,7 @@ export class ManualsService {
       orderBy: [{ updatedAt: "desc" }],
       take: 100
     });
-    return manuals.map((manual) => this.serializeManual(manual));
+    return manuals.map((manual) => this.serializeManual(manual, null));
   }
 
   async getBySlug(actor: Actor, slug: string) {
@@ -128,7 +135,7 @@ export class ManualsService {
     if (actor?.id) {
       await this.prisma.manual.update({ where: { id: manual.id }, data: { viewCount: { increment: 1 } } });
     }
-    return this.serializeManual(manual);
+    return this.serializeManual(manual, actor);
   }
 
   async create(actor: NonNullable<Actor>, dto: CreateManualDto) {
@@ -530,7 +537,7 @@ export class ManualsService {
       throw new NotFoundException("Share link not found or expired.");
     }
     await this.prisma.manualShareLink.update({ where: { id: shareLink.id }, data: { lastUsedAt: new Date() } });
-    return this.serializeManual(shareLink.manual);
+    return this.serializeManual(shareLink.manual, null);
   }
 
   async offlinePack(actor: Actor, manualId: string, token?: string) {
@@ -542,7 +549,7 @@ export class ManualsService {
   async getById(actor: Actor, id: string) {
     const manual = await this.prisma.manual.findUnique({ where: { id }, include: manualInclude });
     if (!manual || manual.deletedAt) throw new NotFoundException("Manual not found.");
-    return this.serializeManual(manual);
+    return this.serializeManual(manual, actor);
   }
 
   visibilityWhere(actor: Actor): Prisma.ManualWhereInput {
@@ -676,14 +683,32 @@ export class ManualsService {
     });
   }
 
-  serializeManual(manual: any) {
+  serializeManual(manual: any, actor: Actor = null) {
     const pages = manual.pages ?? [];
+    const serializedManual = { ...manual };
+    delete serializedManual.permissions;
+    const allKnowledgeSignals = this.buildKnowledgeSignals(manual, pages);
+    const showQualityScore = this.canViewQualityScore(manual, actor);
+    const knowledgeSignals = showQualityScore ? allKnowledgeSignals : { ...allKnowledgeSignals };
+    if (!showQualityScore) delete (knowledgeSignals as any).qualityScore;
+
     return {
-      ...manual,
+      ...serializedManual,
       tags: (manual.tags ?? []).map((item: any) => item.tag ?? item),
       tableOfContents: this.buildTree(pages),
-      knowledgeSignals: this.buildKnowledgeSignals(manual, pages)
+      knowledgeSignals
     };
+  }
+
+  canViewQualityScore(manual: any, actor: Actor) {
+    if (!actor) return false;
+    if (actor.role === Role.admin || manual.ownerId === actor.id) return true;
+    if ((manual.pages ?? []).some((page: any) => page.assignedOwnerId === actor.id)) return true;
+    return (manual.permissions ?? []).some((permission: any) => (
+      permission.userId === actor.id ||
+      permission.role === actor.role ||
+      (permission.team?.members ?? []).some((member: any) => member.userId === actor.id)
+    ));
   }
 
   buildKnowledgeSignals(manual: any, pages: any[]) {

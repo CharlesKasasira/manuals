@@ -34,9 +34,11 @@ export function ManualCard({ manual, hrefPrefix = "/manuals" }: { manual: Manual
             </div>
             {signals ? (
               <div className="grid gap-2 text-xs sm:grid-cols-2">
-                <div className="rounded-md border border-line bg-slate-50 px-3 py-2 text-slate-600">
-                  <span className="font-semibold text-slate-900">{signals.qualityScore}%</span> quality score
-                </div>
+                {typeof signals.qualityScore === "number" ? (
+                  <div className="rounded-md border border-line bg-slate-50 px-3 py-2 text-slate-600">
+                    <span className="font-semibold text-slate-900">{signals.qualityScore}%</span> quality score
+                  </div>
+                ) : null}
                 <div className="inline-flex items-center gap-1 rounded-md border border-line bg-slate-50 px-3 py-2 text-slate-600">
                   <ShieldCheck size={14} />
                   <span className="font-semibold text-slate-900 capitalize">{humanizeStatus(signals.reviewDueStatus)}</span>

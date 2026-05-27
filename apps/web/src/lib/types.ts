@@ -78,7 +78,7 @@ export type Manual = {
     reviewDueStatus: "not_scheduled" | "overdue" | "due_soon" | "current";
     daysUntilReview: number | null;
     daysSinceReview: number | null;
-    qualityScore: number;
+    qualityScore?: number;
   };
 };
 

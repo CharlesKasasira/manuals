@@ -275,7 +275,7 @@ describe("ManualsService", () => {
         { id: "page-2", title: "Empty", parentId: null, status: ManualStatus.draft, contentPlain: "" }
       ],
       tags: [{ tag: { id: "tag-1", name: "Runbook", slug: "runbook" } }]
-    });
+    }, actor);
 
     expect(serialized.tags).toEqual([{ id: "tag-1", name: "Runbook", slug: "runbook" }]);
     expect(serialized.knowledgeSignals).toEqual(expect.objectContaining({
@@ -287,5 +287,34 @@ describe("ManualsService", () => {
       reviewDueStatus: "due_soon"
     }));
     expect(serialized.knowledgeSignals.qualityScore).toBeGreaterThan(0);
+  });
+
+  it("hides quality score from public and non-collaborator readers", () => {
+    const { service } = makeService();
+    const serialized = service.serializeManual({
+      ...manual,
+      ownerId: "owner-2",
+      status: ManualStatus.published,
+      visibility: Visibility.public,
+      pages: [{ id: "page-1", title: "Start", parentId: null, status: ManualStatus.published, contentPlain: "Useful operational detail." }],
+      permissions: []
+    }, null);
+
+    expect(serialized.knowledgeSignals.qualityScore).toBeUndefined();
+    expect(serialized.permissions).toBeUndefined();
+  });
+
+  it("shows quality score to explicit collaborators", () => {
+    const { service } = makeService();
+    const serialized = service.serializeManual({
+      ...manual,
+      ownerId: "owner-2",
+      status: ManualStatus.published,
+      pages: [{ id: "page-1", title: "Start", parentId: null, status: ManualStatus.published, contentPlain: "Useful operational detail." }],
+      permissions: [{ userId: actor.id, role: null, team: null }]
+    }, actor);
+
+    expect(serialized.knowledgeSignals.qualityScore).toBeGreaterThan(0);
+    expect(serialized.permissions).toBeUndefined();
   });
 });

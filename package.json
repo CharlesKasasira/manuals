@@ -11,6 +11,7 @@
     "dev": "npm run dev --workspace @manualflow/web",
     "dev:api": "npm run start:dev --workspace @manualflow/api",
     "build": "npm run build --workspaces --if-present",
+    "clean:next": "node scripts/safe-reset-next-cache.mjs",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "db:generate": "npm run prisma:generate --workspace @manualflow/api",
@@ -19,9 +20,6 @@
     "db:seed": "npm run prisma:seed --workspace @manualflow/api"
   },
   "engines": {
-    "node": ">=20.11.0"
-  },
-  "devDependencies": {
-    "picomatch": "^4.0.4"
+    "node": ">=20.11.0 <25"
   }
 }

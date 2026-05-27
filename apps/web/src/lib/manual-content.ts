@@ -23,8 +23,7 @@ export function sanitizeRichHtml(html = "") {
   return html
     .replace(unsafeElementPattern, "")
     .replace(unsafeVoidElementPattern, "")
-    .replace(/<iframe\b([^>]*)>[\s\S]*?<\/iframe>/gi, (_match, attrs) => sanitizeIframe(attrs))
-    .replace(/<iframe\b([^>]*)\/?>/gi, (_match, attrs) => sanitizeIframe(attrs))
+    .replace(/<iframe\b([^>]*)(?:>[\s\S]*?<\/iframe>|\/?>)/gi, (_match, attrs) => sanitizeIframe(attrs))
     .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/\s+style\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/\s+srcdoc\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
@@ -92,7 +91,9 @@ export function videoEmbedUrl(value: string) {
   try {
     const url = new URL(trimmed);
     const host = url.hostname.replace(/^www\./, "");
-    if (host === "youtube.com" || host === "m.youtube.com") {
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "youtube-nocookie.com") {
+      const embedId = url.pathname.match(/^\/embed\/([^/?#]+)/)?.[1];
+      if (embedId) return `https://www.youtube.com/embed/${encodeURIComponent(embedId)}`;
       const id = url.searchParams.get("v");
       return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}` : "";
     }
