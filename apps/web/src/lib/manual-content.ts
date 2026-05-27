@@ -56,11 +56,18 @@ export function headingsFromRichHtml(html = ""): ManualHeading[] {
 }
 
 export function headingsFromMarkdown(markdown = ""): ManualHeading[] {
-  return markdown.split(/\r?\n/).map((line) => /^(#{1,4})\s+(.+)$/.exec(line)).filter(Boolean).map((match: any) => ({
-    level: match[1].length,
-    title: match[2],
-    id: slugify(match[2])
-  }));
+  return markdown.split(/\r?\n/).reduce<ManualHeading[]>((headings, line) => {
+    const match = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (!match) return headings;
+
+    const title = match[2];
+    headings.push({
+      level: match[1].length,
+      title,
+      id: slugify(title)
+    });
+    return headings;
+  }, []);
 }
 
 export function htmlToText(html = "") {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Pencil } from "lucide-react";
 import { api } from "@/lib/api";
@@ -39,7 +40,7 @@ export function ManualReader({ slug }: { slug: string }) {
         <Link href="/app/manuals" className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50">
           <ArrowLeft size={16} /> Manuals
         </Link>
-        <Link href={`/app/manuals/${manual.slug}`} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800">
+        <Link href={`/app/manuals/${manual.slug}` as Route} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800">
           <Pencil size={16} /> Editor
         </Link>
       </div>

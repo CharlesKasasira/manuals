@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  typedRoutes: false
+  typedRoutes: true
 };
 
 export default nextConfig;

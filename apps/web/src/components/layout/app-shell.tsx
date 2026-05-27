@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { BarChart3, BookOpen, ClipboardCheck, FileArchive, FileText, LayoutDashboard, Library, Settings, ShieldCheck } from "lucide-react";
+import type { Route } from "next";
+import { usePathname, useRouter } from "next/navigation";
+import { BarChart3, BookOpen, ClipboardCheck, FileArchive, FileText, LayoutDashboard, Library, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
+import { api, clearToken } from "@/lib/api";
 
-const nav = [
+const nav: Array<{ href: Route; label: string; icon: typeof LayoutDashboard }> = [
   { href: "/app", label: "Dashboard", icon: LayoutDashboard },
   { href: "/app/manuals", label: "Manuals", icon: Library },
   { href: "/app/drafts", label: "Drafts", icon: FileText },
@@ -19,10 +21,21 @@ const nav = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
 
   function isActive(href: string) {
     if (href === "/app") return pathname === "/app";
     return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
+  async function logout() {
+    try {
+      await api("/auth/logout", { method: "POST" });
+    } finally {
+      clearToken();
+      router.replace("/login");
+      router.refresh();
+    }
   }
 
   return (
@@ -76,6 +89,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link href="/" className="rounded-md border border-line px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
               Public reader
             </Link>
+            <button
+              type="button"
+              onClick={logout}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
           </div>
         </div>
         <div className="p-5">{children}</div>

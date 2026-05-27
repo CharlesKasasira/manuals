@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import type { Route } from "next";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, BookOpenCheck, Clock3, Search, SlidersHorizontal, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -44,7 +45,9 @@ function saveRecentSearch(query: string) {
   return next;
 }
 
-export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus = "all", initialQuery = "" }: { manuals: Manual[]; hrefPrefix?: string; initialStatus?: string; initialQuery?: string }) {
+type ManualHrefPrefix = "/manuals" | "/app/manuals";
+
+export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus = "all", initialQuery = "" }: { manuals: Manual[]; hrefPrefix?: ManualHrefPrefix; initialStatus?: string; initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery);
   const [visibility, setVisibility] = useState("all");
   const [status, setStatus] = useState(initialStatus);
@@ -129,7 +132,6 @@ export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus 
       <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Manual Library</p>
             <h1 className="mt-2 text-2xl font-semibold text-slate-950">{usingSearchEndpoint ? "Search trusted operating guidance." : "Find trusted operating guidance."}</h1>
             <p className="mt-1 text-sm text-slate-600">Ranked results, matched pages, facets, and readable snippets.</p>
           </div>
@@ -257,7 +259,7 @@ export function ManualBrowser({ manuals, hrefPrefix = "/manuals", initialStatus 
   );
 }
 
-function SearchResultCard({ manual, hrefPrefix, query }: { manual: SearchManual; hrefPrefix: string; query: string }) {
+function SearchResultCard({ manual, hrefPrefix, query }: { manual: SearchManual; hrefPrefix: ManualHrefPrefix; query: string }) {
   const topPage = manual.matchedPages[0];
   const href = `${hrefPrefix}/${manual.slug}${topPage ? `#page-${topPage.slug}` : ""}`;
   const reasons = manual.rank.reasons.join(", ");
@@ -266,7 +268,7 @@ function SearchResultCard({ manual, hrefPrefix, query }: { manual: SearchManual;
     <article className="rounded-lg border border-line bg-white p-5 shadow-sm transition hover:border-emerald-300 hover:shadow-md">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <Link href={href} className="group inline-flex items-center gap-2 text-lg font-semibold text-slate-950 hover:text-emerald-700">
+          <Link href={href as Route} className="group inline-flex items-center gap-2 text-lg font-semibold text-slate-950 hover:text-emerald-700">
             {highlight(manual.title, query)}
             <ArrowUpRight className="opacity-0 transition group-hover:opacity-100" size={16} />
           </Link>
@@ -278,14 +280,14 @@ function SearchResultCard({ manual, hrefPrefix, query }: { manual: SearchManual;
             <span>Matched by {reasons}</span>
           </div>
         </div>
-        <Link href={href} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800">
+        <Link href={href as Route} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800">
           Open result <ArrowUpRight size={15} />
         </Link>
       </div>
       {manual.matchedPages.length ? (
         <div className="mt-4 space-y-2 border-t border-line pt-4">
           {manual.matchedPages.slice(0, 3).map((page) => (
-            <Link key={page.id} href={`${hrefPrefix}/${manual.slug}#page-${page.slug}`} className="block rounded-md border border-line bg-slate-50 p-3 hover:border-emerald-300 hover:bg-emerald-50">
+            <Link key={page.id} href={`${hrefPrefix}/${manual.slug}#page-${page.slug}` as Route} className="block rounded-md border border-line bg-slate-50 p-3 hover:border-emerald-300 hover:bg-emerald-50">
               <span className="text-sm font-semibold text-slate-900">{highlight(page.title, query)}</span>
               <span className="mt-1 block text-sm leading-6 text-slate-600">{highlight(page.snippet, query)}</span>
             </Link>

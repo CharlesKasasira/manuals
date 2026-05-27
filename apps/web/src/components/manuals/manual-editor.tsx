@@ -158,7 +158,7 @@ export function ManualEditor({ slug }: { slug: string }) {
     setCommentBody("");
     setCommentAssigneeId("");
     setMentionUserIds([]);
-  }, [selectedPage?.id]);
+  }, [selectedPage]);
 
   async function refresh(statusMessage?: string) {
     await manualQuery.refetch();
@@ -328,7 +328,7 @@ export function ManualEditor({ slug }: { slug: string }) {
             <span>Updated {formatDate(manual.updatedAt)}</span>
             <span>{flatPages.length} pages</span>
             {signals ? <span>{signals.readingTimeMinutes} min read</span> : null}
-            {signals ? <span>{signals.qualityScore}% quality</span> : null}
+            {typeof signals?.qualityScore === "number" ? <span>{signals.qualityScore}% quality</span> : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -359,80 +359,7 @@ export function ManualEditor({ slug }: { slug: string }) {
 
       {message ? <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">{message}</div> : null}
 
-      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_300px]">
-        <aside className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-950"><FileText size={17} />Pages</div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1">
-                {flatPages.length ? flatPages.map((page) => (
-                  <button
-                    key={page.id}
-                    type="button"
-                    onClick={() => setSelectedPageId(page.id)}
-                    className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition ${selectedPage?.id === page.id ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"}`}
-                    style={{ paddingLeft: `${12 + page.depth * 18}px` }}
-                  >
-                    <span className="truncate">{page.title}</span>
-                    <span className="flex shrink-0 items-center gap-1 text-xs opacity-70">
-                      {page.comments?.some((comment) => comment.status === "open") ? <MessageSquarePlus size={12} /> : null}
-                      {page.assignedOwner ? <UserRound size={12} /> : null}
-                      {page.status}
-                    </span>
-                  </button>
-                )) : (
-                  <p className="rounded-md border border-dashed border-line p-4 text-sm text-slate-500">Create the first page to start drafting.</p>
-                )}
-              </div>
-              <div className="mt-4 flex gap-2">
-                <Button variant="secondary" className="flex-1" onClick={() => moveSelected(-1)} disabled={!selectedPage || Boolean(busy)}>
-                  <ArrowUp size={16} /> Up
-                </Button>
-                <Button variant="secondary" className="flex-1" onClick={() => moveSelected(1)} disabled={!selectedPage || Boolean(busy)}>
-                  <ArrowDown size={16} /> Down
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-950"><FilePlus2 size={17} />New page</div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={createPage} className="space-y-3">
-                <input
-                  required
-                  value={newPage.title}
-                  onChange={(event) => setNewPage((page) => ({ ...page, title: event.target.value }))}
-                  placeholder="Page title"
-                  className="h-10 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400"
-                />
-                <select
-                  value={newPage.parentId}
-                  onChange={(event) => setNewPage((page) => ({ ...page, parentId: event.target.value }))}
-                  className="h-10 w-full rounded-md border border-line bg-white px-3 text-sm"
-                >
-                  <option value="">Top-level page</option>
-                  {flatPages.map((page) => <option key={page.id} value={page.id}>{"- ".repeat(page.depth)}{page.title}</option>)}
-                </select>
-                <RichManualEditor
-                  value={newPage.contentHtml}
-                  onChange={(contentHtml) => setNewPage((page) => ({ ...page, contentHtml }))}
-                  placeholder="Start the page..."
-                  mediaVisibility={manual.visibility}
-                  compact
-                />
-                <Button type="submit" className="w-full" disabled={busy === "create-page"}>
-                  {busy === "create-page" ? <Loader2 className="animate-spin" size={16} /> : <FilePlus2 size={16} />} Create page
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </aside>
-
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
         <form onSubmit={savePage} className="min-w-0 rounded-lg border border-line bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
@@ -509,159 +436,206 @@ export function ManualEditor({ slug }: { slug: string }) {
           )}
         </form>
 
-        <aside className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-950"><MessageSquarePlus size={17} />Page collaboration</div>
-                {selectedPage ? <span className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">{openCommentCount} open</span> : null}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {selectedPage ? (
-                <div className="space-y-4">
-                  <label className="block">
-                    <span className="flex items-center gap-2 text-sm font-medium text-slate-700"><UserRound size={15} />Assigned owner</span>
-                    <select
-                      value={selectedPage.assignedOwnerId ?? ""}
-                      onChange={(event) => assignSelectedPage(event.target.value)}
-                      disabled={busy === "assign-page" || collaborators.isLoading}
-                      className="mt-1 h-10 w-full rounded-md border border-line bg-white px-3 text-sm"
-                    >
-                      <option value="">Unassigned</option>
-                      {(collaborators.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.name} / {user.role}</option>)}
-                    </select>
-                  </label>
-
-                  <form onSubmit={createPageComment} className="space-y-3 rounded-md border border-line bg-slate-50 p-3">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <select value={commentKind} onChange={(event) => setCommentKind(event.target.value as PageCommentKind)} className="h-10 rounded-md border border-line bg-white px-3 text-sm">
-                        <option value="comment">Comment</option>
-                        <option value="reviewer_note">Reviewer note</option>
-                        <option value="change_request">Change request</option>
-                      </select>
-                      <input value={commentAnchor} onChange={(event) => setCommentAnchor(event.target.value)} placeholder="Section anchor" className="h-10 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-slate-400" />
-                    </div>
-                    <select value={commentAssigneeId} onChange={(event) => setCommentAssigneeId(event.target.value)} className="h-10 w-full rounded-md border border-line bg-white px-3 text-sm">
-                      <option value="">No action owner</option>
-                      {(collaborators.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-                    </select>
-                    <select
-                      multiple
-                      value={mentionUserIds}
-                      onChange={(event) => setMentionUserIds(Array.from(event.target.selectedOptions).map((option) => option.value))}
-                      className="min-h-20 w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
-                    >
-                      {(collaborators.data ?? []).map((user) => <option key={user.id} value={user.id}>@{user.name}</option>)}
-                    </select>
-                    <textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a note, mention teammates, or request a section change..." className="min-h-24 w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" />
-                    <Button type="submit" className="w-full" disabled={!commentBody.trim() || busy === "create-comment"}>
-                      {busy === "create-comment" ? <Loader2 className="animate-spin" size={16} /> : <MessageSquarePlus size={16} />} Add note
-                    </Button>
-                  </form>
-
-                  <div className="space-y-2">
-                    {selectedPageComments.length ? selectedPageComments.map((comment) => (
-                      <div key={comment.id} className={`rounded-md border p-3 ${comment.kind === "change_request" && comment.status === "open" ? "border-amber-200 bg-amber-50" : "border-line bg-white"}`}>
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-xs font-semibold capitalize text-slate-700">{humanizeStatus(comment.kind)}</span>
-                            <span className="rounded-full border border-line bg-white px-2 py-0.5 text-xs font-semibold capitalize text-slate-600">{comment.status}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => updatePageComment(comment, comment.status === "open" ? "resolved" : "open")}
-                            className="text-xs font-semibold text-emerald-700 hover:text-emerald-900"
-                            disabled={busy === `comment-${comment.id}`}
-                          >
-                            {comment.status === "open" ? "Resolve" : "Reopen"}
-                          </button>
-                        </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-700">{comment.body}</p>
-                        <div className="mt-2 space-y-1 text-xs text-slate-500">
-                          <p>{comment.author?.name ?? "Unknown"} / {formatDate(comment.createdAt)}</p>
-                          {comment.sectionAnchor ? <p>Section: {comment.sectionAnchor}</p> : null}
-                          {comment.assignedTo ? <p>Owner: {comment.assignedTo.name}</p> : null}
-                          {comment.mentions?.length ? <p>Mentions: {comment.mentions.map((mention) => `@${mention.user.name}`).join(", ")}</p> : null}
-                        </div>
-                      </div>
-                    )) : (
-                      <p className="rounded-md border border-dashed border-line p-4 text-sm text-slate-500">No page comments yet.</p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">Select a page to add notes, mentions, and section-level change requests.</p>
+        <aside className="space-y-3 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:pr-1">
+          <CollapsiblePanel title="Pages" icon={<FileText size={17} />} defaultOpen>
+            <div className="space-y-1">
+              {flatPages.length ? flatPages.map((page) => (
+                <button
+                  key={page.id}
+                  type="button"
+                  onClick={() => setSelectedPageId(page.id)}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition ${selectedPage?.id === page.id ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"}`}
+                  style={{ paddingLeft: `${12 + page.depth * 18}px` }}
+                >
+                  <span className="truncate">{page.title}</span>
+                  <span className="flex shrink-0 items-center gap-1 text-xs opacity-70">
+                    {page.comments?.some((comment) => comment.status === "open") ? <MessageSquarePlus size={12} /> : null}
+                    {page.assignedOwner ? <UserRound size={12} /> : null}
+                    {page.status}
+                  </span>
+                </button>
+              )) : (
+                <p className="rounded-md border border-dashed border-line p-4 text-sm text-slate-500">Create the first page to start drafting.</p>
               )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-950"><BookOpenCheck size={17} />Knowledge health</div>
-            </CardHeader>
-            <CardContent>
-              {signals ? (
-                <dl className="space-y-3 text-sm">
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => moveSelected(-1)} disabled={!selectedPage || Boolean(busy)}>
+                <ArrowUp size={16} /> Up
+              </Button>
+              <Button variant="secondary" className="flex-1" onClick={() => moveSelected(1)} disabled={!selectedPage || Boolean(busy)}>
+                <ArrowDown size={16} /> Down
+              </Button>
+            </div>
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="New page" icon={<FilePlus2 size={17} />}>
+            <form onSubmit={createPage} className="space-y-3">
+              <input
+                required
+                value={newPage.title}
+                onChange={(event) => setNewPage((page) => ({ ...page, title: event.target.value }))}
+                placeholder="Page title"
+                className="h-10 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400"
+              />
+              <select
+                value={newPage.parentId}
+                onChange={(event) => setNewPage((page) => ({ ...page, parentId: event.target.value }))}
+                className="h-10 w-full rounded-md border border-line bg-white px-3 text-sm"
+              >
+                <option value="">Top-level page</option>
+                {flatPages.map((page) => <option key={page.id} value={page.id}>{"- ".repeat(page.depth)}{page.title}</option>)}
+              </select>
+              <RichManualEditor
+                value={newPage.contentHtml}
+                onChange={(contentHtml) => setNewPage((page) => ({ ...page, contentHtml }))}
+                placeholder="Start the page..."
+                mediaVisibility={manual.visibility}
+                compact
+              />
+              <Button type="submit" className="w-full" disabled={busy === "create-page"}>
+                {busy === "create-page" ? <Loader2 className="animate-spin" size={16} /> : <FilePlus2 size={16} />} Create page
+              </Button>
+            </form>
+          </CollapsiblePanel>
+
+          <CollapsiblePanel
+            title="Page collaboration"
+            icon={<MessageSquarePlus size={17} />}
+            badge={selectedPage ? `${openCommentCount} open` : undefined}
+          >
+            {selectedPage ? (
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="flex items-center gap-2 text-sm font-medium text-slate-700"><UserRound size={15} />Assigned owner</span>
+                  <select
+                    value={selectedPage.assignedOwnerId ?? ""}
+                    onChange={(event) => assignSelectedPage(event.target.value)}
+                    disabled={busy === "assign-page" || collaborators.isLoading}
+                    className="mt-1 h-10 w-full rounded-md border border-line bg-white px-3 text-sm"
+                  >
+                    <option value="">Unassigned</option>
+                    {(collaborators.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.name} / {user.role}</option>)}
+                  </select>
+                </label>
+
+                <form onSubmit={createPageComment} className="space-y-3 rounded-md border border-line bg-slate-50 p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <select value={commentKind} onChange={(event) => setCommentKind(event.target.value as PageCommentKind)} className="h-10 rounded-md border border-line bg-white px-3 text-sm">
+                      <option value="comment">Comment</option>
+                      <option value="reviewer_note">Reviewer note</option>
+                      <option value="change_request">Change request</option>
+                    </select>
+                    <input value={commentAnchor} onChange={(event) => setCommentAnchor(event.target.value)} placeholder="Section anchor" className="h-10 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-slate-400" />
+                  </div>
+                  <select value={commentAssigneeId} onChange={(event) => setCommentAssigneeId(event.target.value)} className="h-10 w-full rounded-md border border-line bg-white px-3 text-sm">
+                    <option value="">No action owner</option>
+                    {(collaborators.data ?? []).map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
+                  </select>
+                  <select
+                    multiple
+                    value={mentionUserIds}
+                    onChange={(event) => setMentionUserIds(Array.from(event.target.selectedOptions).map((option) => option.value))}
+                    className="min-h-20 w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+                  >
+                    {(collaborators.data ?? []).map((user) => <option key={user.id} value={user.id}>@{user.name}</option>)}
+                  </select>
+                  <textarea value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="Leave a note, mention teammates, or request a section change..." className="min-h-24 w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" />
+                  <Button type="submit" className="w-full" disabled={!commentBody.trim() || busy === "create-comment"}>
+                    {busy === "create-comment" ? <Loader2 className="animate-spin" size={16} /> : <MessageSquarePlus size={16} />} Add note
+                  </Button>
+                </form>
+
+                <div className="space-y-2">
+                  {selectedPageComments.length ? selectedPageComments.map((comment) => (
+                    <div key={comment.id} className={`rounded-md border p-3 ${comment.kind === "change_request" && comment.status === "open" ? "border-amber-200 bg-amber-50" : "border-line bg-white"}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-line bg-slate-50 px-2 py-0.5 text-xs font-semibold capitalize text-slate-700">{humanizeStatus(comment.kind)}</span>
+                          <span className="rounded-full border border-line bg-white px-2 py-0.5 text-xs font-semibold capitalize text-slate-600">{comment.status}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updatePageComment(comment, comment.status === "open" ? "resolved" : "open")}
+                          className="text-xs font-semibold text-emerald-700 hover:text-emerald-900"
+                          disabled={busy === `comment-${comment.id}`}
+                        >
+                          {comment.status === "open" ? "Resolve" : "Reopen"}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-sm leading-6 text-slate-700">{comment.body}</p>
+                      <div className="mt-2 space-y-1 text-xs text-slate-500">
+                        <p>{comment.author?.name ?? "Unknown"} / {formatDate(comment.createdAt)}</p>
+                        {comment.sectionAnchor ? <p>Section: {comment.sectionAnchor}</p> : null}
+                        {comment.assignedTo ? <p>Owner: {comment.assignedTo.name}</p> : null}
+                        {comment.mentions?.length ? <p>Mentions: {comment.mentions.map((mention) => `@${mention.user.name}`).join(", ")}</p> : null}
+                      </div>
+                    </div>
+                  )) : (
+                    <p className="rounded-md border border-dashed border-line p-4 text-sm text-slate-500">No page comments yet.</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Select a page to add notes, mentions, and section-level change requests.</p>
+            )}
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="Knowledge health" icon={<BookOpenCheck size={17} />}>
+            {signals ? (
+              <dl className="space-y-3 text-sm">
+                {typeof signals.qualityScore === "number" ? (
                   <div className="flex justify-between gap-3">
                     <dt className="text-slate-500">Quality score</dt>
                     <dd className="font-semibold text-slate-900">{signals.qualityScore}%</dd>
                   </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Words</dt>
-                    <dd className="font-semibold text-slate-900">{signals.wordCount}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Empty pages</dt>
-                    <dd className="font-semibold text-slate-900">{signals.emptyPageCount}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-slate-500">Review due</dt>
-                    <dd className="font-semibold capitalize text-slate-900">{humanizeStatus(signals.reviewDueStatus)}</dd>
-                  </div>
-                </dl>
-              ) : (
-                <p className="text-sm text-slate-500">Health signals appear after the manual is loaded from the API.</p>
-              )}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="text-sm font-semibold text-slate-950">Review note</div>
-            </CardHeader>
-            <CardContent>
-              <textarea
-                value={reviewComment}
-                onChange={(event) => setReviewComment(event.target.value)}
-                placeholder="Optional comment for review actions"
-                className="min-h-32 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-slate-400"
-              />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="text-sm font-semibold text-slate-950">Manual state</div>
-            </CardHeader>
-            <CardContent>
-              <dl className="space-y-3 text-sm">
+                ) : null}
                 <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">Review</dt>
-                  <dd className="font-semibold text-slate-900">{manual.reviewState}</dd>
+                  <dt className="text-slate-500">Words</dt>
+                  <dd className="font-semibold text-slate-900">{signals.wordCount}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">Published</dt>
-                  <dd className="font-semibold text-slate-900">{manual.publishedAt ? formatDate(manual.publishedAt) : "-"}</dd>
+                  <dt className="text-slate-500">Empty pages</dt>
+                  <dd className="font-semibold text-slate-900">{signals.emptyPageCount}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">Reviewed</dt>
-                  <dd className="font-semibold text-slate-900">{manual.lastReviewedAt ? formatDate(manual.lastReviewedAt) : "-"}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">Views</dt>
-                  <dd className="font-semibold text-slate-900">{manual.viewCount ?? 0}</dd>
+                  <dt className="text-slate-500">Review due</dt>
+                  <dd className="font-semibold capitalize text-slate-900">{humanizeStatus(signals.reviewDueStatus)}</dd>
                 </div>
               </dl>
-            </CardContent>
-          </Card>
+            ) : (
+              <p className="text-sm text-slate-500">Health signals appear after the manual is loaded from the API.</p>
+            )}
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="Review note">
+            <textarea
+              value={reviewComment}
+              onChange={(event) => setReviewComment(event.target.value)}
+              placeholder="Optional comment for review actions"
+              className="min-h-32 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-slate-400"
+            />
+          </CollapsiblePanel>
+
+          <CollapsiblePanel title="Manual state">
+            <dl className="space-y-3 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Review</dt>
+                <dd className="font-semibold text-slate-900">{manual.reviewState}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Published</dt>
+                <dd className="font-semibold text-slate-900">{manual.publishedAt ? formatDate(manual.publishedAt) : "-"}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Reviewed</dt>
+                <dd className="font-semibold text-slate-900">{manual.lastReviewedAt ? formatDate(manual.lastReviewedAt) : "-"}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Views</dt>
+                <dd className="font-semibold text-slate-900">{manual.viewCount ?? 0}</dd>
+              </div>
+            </dl>
+          </CollapsiblePanel>
         </aside>
       </div>
     </div>
@@ -976,6 +950,7 @@ function ImageCropDialog({
             className="mx-auto overflow-hidden rounded-md bg-slate-900"
             style={{ width: "min(100%, 560px)", aspectRatio: `${width} / ${height}` }}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={draft.url}
               alt=""

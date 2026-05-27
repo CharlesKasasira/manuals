@@ -19,7 +19,6 @@ export default async function PublicManualPage({ params }: { params: Promise<{ s
       <main>
         <section className="border-b border-line bg-white px-4 py-8">
           <div className="mx-auto max-w-7xl">
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">ManualFlow Public Manual</p>
             <h1 className="mt-2 text-3xl font-semibold text-slate-950">{manual!.title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{manual!.description}</p>
           </div>

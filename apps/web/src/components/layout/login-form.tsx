@@ -2,8 +2,10 @@
 
 import type React from "react";
 import { useState } from "react";
+import type { Route } from "next";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, Mail } from "lucide-react";
+import { BookOpen, Eye, EyeOff, Home, Mail } from "lucide-react";
 import { api, setToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
@@ -16,6 +18,7 @@ export function LoginForm() {
   const [email, setEmail] = useState("admin@manualflow.local");
   const [password, setPassword] = useState("Manuals123!");
   const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [showResetRequest, setShowResetRequest] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,7 +33,7 @@ export function LoginForm() {
         body: JSON.stringify({ email, password })
       });
       setToken(response.data.token);
-      router.push(nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/app");
+      router.push((nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/app") as Route);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -76,7 +79,11 @@ export function LoginForm() {
 
   return (
     <main className="grid min-h-screen place-items-center bg-panel px-4">
-      <div className="absolute right-4 top-4">
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        <Link href="/" className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-700 shadow-soft transition hover:bg-slate-50">
+          <Home size={16} />
+          Home
+        </Link>
         <ThemeToggle />
       </div>
       <form onSubmit={resetToken ? completeReset : showResetRequest ? requestReset : submit} className="w-full max-w-md rounded-lg border border-line bg-white p-6 shadow-soft">
@@ -104,7 +111,22 @@ export function LoginForm() {
               {!showResetRequest ? (
                 <label className="block">
                   <span className="text-sm font-medium text-slate-700">Password</span>
-                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" />
+                  <span className="relative mt-1 block">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="h-11 w-full rounded-md border border-line px-3 pr-11 text-sm outline-none focus:border-slate-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-r-md text-slate-500 transition hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </span>
                 </label>
               ) : null}
             </>

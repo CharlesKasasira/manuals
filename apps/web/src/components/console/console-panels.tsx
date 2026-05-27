@@ -1,9 +1,11 @@
 "use client";
 
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import Image from "next/image";
 import Link from "next/link";
+import type { Route } from "next";
 import {
   Activity,
   ArrowUpRight,
@@ -14,7 +16,6 @@ import {
   ClipboardCheck,
   Download,
   Eye,
-  FileArchive,
   FileText,
   FolderOpen,
   Loader2,
@@ -59,11 +60,11 @@ export function DashboardPanel() {
   const pendingReviews = reviewData.filter((review) => review.decision === "submitted").slice(0, 5);
   const recentManuals = [...manualData].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 5);
 
-  const stats = [
-    { label: "Published manuals", value: String(published), icon: BookOpen, href: "/app/manuals?status=published", action: "View published" },
-    { label: "Drafts in progress", value: String(drafts), icon: ClipboardCheck, href: "/app/manuals?status=draft", action: "View drafts" },
+  const stats: Array<{ label: string; value: string; icon: typeof BookOpen; href: Route; action: string }> = [
+    { label: "Published manuals", value: String(published), icon: BookOpen, href: "/app/manuals?status=published" as Route, action: "View published" },
+    { label: "Drafts in progress", value: String(drafts), icon: ClipboardCheck, href: "/app/manuals?status=draft" as Route, action: "View drafts" },
     { label: "Manual views", value: String(views), icon: Eye, href: "/app/analytics", action: "Open analytics" },
-    { label: "Audit events", value: audit.data ? String(audit.data.length) : "Restricted", icon: ShieldCheck, href: "/app/admin?tab=audit", action: "View audit" }
+    { label: "Audit events", value: audit.data ? String(audit.data.length) : "Restricted", icon: ShieldCheck, href: "/app/admin?tab=audit" as Route, action: "View audit" }
   ];
 
   if (manuals.isLoading) return <EmptyState>Loading dashboard data...</EmptyState>;
@@ -84,12 +85,12 @@ export function DashboardPanel() {
           <CardContent>
             <div className="grid gap-3 md:grid-cols-2">
               <QueueList title="Pending reviews" items={pendingReviews.map((review) => ({
-                href: review.manual?.slug ? `/app/manuals/${review.manual.slug}` : undefined,
+                href: review.manual?.slug ? `/app/manuals/${review.manual.slug}` as Route : undefined,
                 title: review.manual?.title ?? "Untitled manual",
                 meta: `${review.requestedBy?.name ?? "Unknown"} / ${formatDate(review.createdAt)}`
               }))} />
               <QueueList title="Recently updated" items={recentManuals.map((manual) => ({
-                href: `/app/manuals/${manual.slug}`,
+                href: `/app/manuals/${manual.slug}` as Route,
                 title: manual.title,
                 meta: `${manual.status.replaceAll("_", " ")} / ${formatDate(manual.updatedAt)}`
               }))} />
@@ -107,7 +108,7 @@ export function DashboardPanel() {
   );
 }
 
-function DashboardStatCard({ label, value, icon: Icon, href, action }: { label: string; value: string; icon: typeof BookOpen; href: string; action: string }) {
+function DashboardStatCard({ label, value, icon: Icon, href, action }: { label: string; value: string; icon: typeof BookOpen; href: Route; action: string }) {
   return (
     <Link href={href} className="group block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
       <Card className="h-full transition duration-200 group-hover:-translate-y-0.5 group-hover:border-emerald-300 group-hover:shadow-soft">
@@ -126,7 +127,7 @@ function DashboardStatCard({ label, value, icon: Icon, href, action }: { label: 
   );
 }
 
-function QueueList({ title, items }: { title: string; items: Array<{ title: string; meta: string; href?: string }> }) {
+function QueueList({ title, items }: { title: string; items: Array<{ title: string; meta: string; href?: Route }> }) {
   return (
     <div className="rounded-lg border border-line bg-slate-50 p-4">
       <p className="font-semibold text-slate-900">{title}</p>
@@ -172,7 +173,7 @@ export function ReviewsPanel() {
             {data.length ? data.map((review) => (
               <div key={review.id} className="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto] lg:items-center">
                 <div>
-                  <Link href={review.manual?.slug ? `/app/manuals/${review.manual.slug}` : "#"} className="font-semibold text-slate-950 hover:text-emerald-700">
+                  <Link href={(review.manual?.slug ? `/app/manuals/${review.manual.slug}` : "/app/manuals") as Route} className="font-semibold text-slate-950 hover:text-emerald-700">
                     {review.manual?.title ?? "Untitled manual"}
                   </Link>
                   <p className="mt-1 text-sm text-slate-500">{review.comment || "No review comment."}</p>
@@ -195,10 +196,19 @@ export function AssetsPanel() {
   const [message, setMessage] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [preview, setPreview] = useState<{ asset: Asset; url: string; mimeType: string } | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const assets = useQuery({ queryKey: ["assets"], queryFn: async () => (await api<{ data: Asset[] }>("/assets")).data, retry: false });
   const data = assets.data ?? [];
   const totalBytes = data.reduce((sum, asset) => sum + (asset.sizeBytes ?? 0), 0);
+
+  useEffect(() => {
+    return () => {
+      if (preview) window.URL.revokeObjectURL(preview.url);
+    };
+  }, [preview]);
 
   function chooseFile() {
     fileInputRef.current?.click();
@@ -263,6 +273,33 @@ export function AssetsPanel() {
     link.download = asset.fileName;
     link.click();
     window.URL.revokeObjectURL(url);
+  }
+
+  function closePreview() {
+    if (preview) window.URL.revokeObjectURL(preview.url);
+    setPreview(null);
+    setPreviewError("");
+  }
+
+  async function viewAsset(asset: Asset) {
+    if (preview) window.URL.revokeObjectURL(preview.url);
+    setPreview(null);
+    setPreviewError("");
+    setPreviewLoadingId(asset.id);
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_URL}/assets/${asset.id}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined
+      });
+      if (!response.ok) throw new Error("Preview failed.");
+      const blob = await response.blob();
+      const mimeType = response.headers.get("Content-Type") || asset.mimeType || blob.type || "application/octet-stream";
+      setPreview({ asset, url: window.URL.createObjectURL(blob), mimeType });
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "Preview failed.");
+    } finally {
+      setPreviewLoadingId(null);
+    }
   }
 
   if (assets.isLoading) return <EmptyState>Loading assets...</EmptyState>;
@@ -365,6 +402,9 @@ export function AssetsPanel() {
                 <span className="text-sm text-slate-600">{formatBytes(asset.sizeBytes ?? 0)}</span>
                 <span className="text-sm text-slate-500">{formatDate(asset.createdAt)}</span>
                 <div className="flex gap-2">
+                  <Button type="button" variant="secondary" onClick={() => viewAsset(asset)} disabled={previewLoadingId === asset.id}>
+                    {previewLoadingId === asset.id ? <Loader2 className="animate-spin" size={16} /> : <Eye size={16} />} View
+                  </Button>
                   <Button type="button" variant="secondary" onClick={() => download(asset)}><Download size={16} /></Button>
                   <Button type="button" variant="danger" onClick={() => remove(asset.id)}>Delete</Button>
                 </div>
@@ -373,6 +413,56 @@ export function AssetsPanel() {
           </div>
         </CardContent>
       </Card>
+      {previewError ? <ErrorState>{previewError}</ErrorState> : null}
+      {preview ? <AssetPreviewDialog preview={preview} onClose={closePreview} onDownload={() => download(preview.asset)} /> : null}
+    </div>
+  );
+}
+
+function AssetPreviewDialog({
+  preview,
+  onClose,
+  onDownload
+}: {
+  preview: { asset: Asset; url: string; mimeType: string };
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  const isImage = preview.mimeType.startsWith("image/");
+  const isVideo = preview.mimeType.startsWith("video/");
+  const isPdf = preview.mimeType.includes("pdf");
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-label={`Preview ${preview.asset.fileName}`}>
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-line p-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-slate-950">{preview.asset.fileName}</h2>
+            <p className="mt-1 text-sm text-slate-500">{preview.mimeType} / {formatBytes(preview.asset.sizeBytes ?? 0)}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" variant="secondary" onClick={onDownload}><Download size={16} />Download</Button>
+            <Button type="button" variant="ghost" onClick={onClose} aria-label="Close preview"><X size={18} /></Button>
+          </div>
+        </div>
+        <div className="grid min-h-[320px] flex-1 place-items-center bg-slate-100 p-4">
+          {isImage ? (
+            <div className="relative h-[70vh] w-full">
+              <Image src={preview.url} alt={preview.asset.fileName} fill unoptimized className="rounded-md object-contain shadow-sm" />
+            </div>
+          ) : isVideo ? (
+            <video src={preview.url} controls className="max-h-[70vh] max-w-full rounded-md bg-black" />
+          ) : isPdf ? (
+            <iframe src={preview.url} title={preview.asset.fileName} className="h-[70vh] w-full rounded-md border border-line bg-white" />
+          ) : (
+            <div className="max-w-md rounded-md border border-line bg-white p-5 text-center">
+              <FileText className="mx-auto text-slate-500" size={32} />
+              <p className="mt-3 text-sm font-semibold text-slate-950">Preview is not available for this file type.</p>
+              <p className="mt-1 text-sm text-slate-500">You can still download the asset to open it with a compatible app.</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -380,10 +470,10 @@ export function AssetsPanel() {
 export function AnalyticsPanel() {
   const manuals = useQuery({ queryKey: ["analytics", "manuals"], queryFn: async () => (await api<{ data: Manual[] }>("/manuals")).data, retry: false });
   const [selectedId, setSelectedId] = useState("");
-  const manualData = manuals.data ?? [];
+  const manualData = manuals.data;
 
   useEffect(() => {
-    if (!selectedId && manualData[0]?.id) setSelectedId(manualData[0].id);
+    if (!selectedId && manualData?.[0]?.id) setSelectedId(manualData[0].id);
   }, [manualData, selectedId]);
 
   const analytics = useQuery({
@@ -407,7 +497,7 @@ export function AnalyticsPanel() {
           <p className="mt-1 text-sm text-slate-600">Manual views, feedback, bookmarks, follows, status, and version.</p>
         </div>
         <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)} className="h-10 min-w-72 rounded-md border border-line bg-white px-3 text-sm">
-          {manualData.map((manual) => <option key={manual.id} value={manual.id}>{manual.title}</option>)}
+          {(manualData ?? []).map((manual) => <option key={manual.id} value={manual.id}>{manual.title}</option>)}
         </select>
       </div>
       {analytics.isError ? <ErrorState>You do not have access to analytics for this manual.</ErrorState> : null}

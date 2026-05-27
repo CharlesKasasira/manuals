@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -165,7 +166,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
           </label>
           <nav className="space-y-1">
             {visiblePages.map((page) => (
-              <Link key={page.id} href={`${readerHref}#page-${page.slug}`} className={`block rounded-md px-3 py-2 text-sm font-medium hover:bg-emerald-50 hover:text-emerald-800 ${activePageSlug === page.slug ? "bg-emerald-50 text-emerald-800" : "text-slate-700"}`}>
+              <Link key={page.id} href={`${readerHref}#page-${page.slug}` as Route} className={`block rounded-md px-3 py-2 text-sm font-medium hover:bg-emerald-50 hover:text-emerald-800 ${activePageSlug === page.slug ? "bg-emerald-50 text-emerald-800" : "text-slate-700"}`}>
                 {page.title}
               </Link>
             ))}

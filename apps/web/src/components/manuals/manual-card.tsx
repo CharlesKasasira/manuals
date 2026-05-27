@@ -1,16 +1,19 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { ArrowRight, BookOpen, Eye, FileText, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Manual } from "@/lib/types";
 import { formatDate, humanizeStatus } from "@/lib/utils";
 
-export function ManualCard({ manual, hrefPrefix = "/manuals" }: { manual: Manual; hrefPrefix?: string }) {
+type ManualHrefPrefix = "/manuals" | "/app/manuals";
+
+export function ManualCard({ manual, hrefPrefix = "/manuals" }: { manual: Manual; hrefPrefix?: ManualHrefPrefix }) {
   const signals = manual.knowledgeSignals;
   const pageCount = signals?.pageCount ?? manual.pages?.length ?? 0;
 
   return (
-    <Link href={`${hrefPrefix}/${manual.slug}`}>
+    <Link href={`${hrefPrefix}/${manual.slug}` as Route}>
       <Card className="transition hover:border-emerald-400 hover:shadow-soft">
         <CardContent>
           <div className="flex flex-col gap-4">

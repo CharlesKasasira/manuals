@@ -47,7 +47,7 @@ describe("ManualBrowser", () => {
   it("server-renders manual cards, counts, filters, tags, and console links", () => {
     const html = renderBrowser(<ManualBrowser manuals={manuals} hrefPrefix="/app/manuals" />);
 
-    expect(html).toContain("Manual Library");
+    expect(html).toContain("Find trusted operating guidance.");
     expect(html).toContain("2 manuals");
     expect(html).toContain("2 results");
     expect(html).toContain("Network Operations Manual");
