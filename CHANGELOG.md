@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added an editor governance workflow visualizer and inline comment pinning for selected manual text.
+- Improved the manual authoring experience with clearer slash commands, an in-context visual editor surface, and drag-and-drop page reordering/nesting.
 - Added hoverable Copy Code controls and clearer language badges for reader code blocks.
 - Loaded Inter for body copy and Outfit for headings through Next font optimization.
 - Added smoother micro-interactions and scale/shadow hover treatments for manual cards and shared interactive surfaces.

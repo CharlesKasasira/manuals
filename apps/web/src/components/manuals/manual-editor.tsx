@@ -6,15 +6,15 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   BookOpenCheck,
   Bold,
   CheckCircle2,
   Code2,
+  GitBranch,
   ExternalLink,
   FilePlus2,
   FileText,
+  GripVertical,
   Heading1,
   Heading2,
   Image as ImageIcon,
@@ -46,6 +46,8 @@ import { formatDate, humanizeStatus } from "@/lib/utils";
 type FlatPage = ManualPage & { depth: number };
 type LifecycleAction = "submit-review" | "approve" | "request-changes" | "publish" | "archive";
 type SlashCommandId = "procedure" | "warning" | "table" | "code" | "diagram" | "tabs" | "image" | "video";
+type PageDropPosition = "before" | "inside" | "after";
+type InlineCommentDraft = { anchor: string; quote: string; body: string; kind: PageCommentKind };
 
 type SlashCommand = {
   id: SlashCommandId;
@@ -62,12 +64,12 @@ const blankPage = {
 
 const slashCommands: SlashCommand[] = [
   { id: "procedure", label: "Procedure", hint: "Purpose, steps, and verification", keywords: ["runbook", "steps", "process"] },
-  { id: "warning", label: "Warning", hint: "Risk, exception, or prerequisite callout", keywords: ["alert", "callout", "caution"] },
-  { id: "table", label: "Table", hint: "Structured comparison or requirements grid", keywords: ["grid", "matrix"] },
-  { id: "code", label: "Code", hint: "Highlighted code block", keywords: ["snippet", "playground"] },
+  { id: "warning", label: "Callout Block", hint: "Risk, note, exception, or prerequisite", keywords: ["alert", "callout", "caution", "warning"] },
+  { id: "table", label: "Insert Table", hint: "Structured comparison or requirements grid", keywords: ["grid", "matrix", "table"] },
+  { id: "code", label: "Code Block", hint: "Highlighted code snippet", keywords: ["snippet", "playground", "code"] },
   { id: "diagram", label: "Mermaid diagram", hint: "Flowchart, sequence, or architecture map", keywords: ["mermaid", "flowchart", "sequence", "architecture"] },
   { id: "tabs", label: "Code tabs", hint: "Switcher for alternate commands or languages", keywords: ["switcher", "playground", "languages"] },
-  { id: "image", label: "Image", hint: "Upload and crop an image", keywords: ["photo", "diagram", "screenshot"] },
+  { id: "image", label: "Add Image", hint: "Upload and crop an image", keywords: ["photo", "diagram", "screenshot", "image"] },
   { id: "video", label: "Video", hint: "Embed YouTube, Vimeo, or uploaded video", keywords: ["embed", "media"] }
 ];
 
@@ -79,6 +81,31 @@ export function slashCommandsForQuery(query: string) {
     command.id.includes(normalized) ||
     command.keywords.some((keyword) => keyword.includes(normalized))
   ));
+}
+
+export function governanceStepsForStatus(status: Manual["status"], reviewState?: string) {
+  const normalizedReview = (reviewState ?? "").toLowerCase();
+  const steps = [
+    { id: "draft", label: "Draft" },
+    { id: "in_review", label: "Under Review" },
+    { id: "changes_requested", label: "Changes Requested" },
+    { id: "approved", label: "Approved" },
+    { id: "published", label: "Published" }
+  ];
+  const activeId = status === "published"
+    ? "published"
+    : status === "approved"
+      ? "approved"
+      : normalizedReview.includes("changes") || normalizedReview.includes("request")
+        ? "changes_requested"
+        : status === "in_review"
+          ? "in_review"
+          : "draft";
+  const activeIndex = steps.findIndex((step) => step.id === activeId);
+  return steps.map((step, index) => ({
+    ...step,
+    state: index < activeIndex ? "complete" : index === activeIndex ? "active" : "upcoming"
+  }));
 }
 
 function flattenPages(pages: ManualPage[] = [], depth = 0): FlatPage[] {
@@ -111,6 +138,46 @@ function descendantsOf(pageId: string, pages: ManualPage[] = []) {
   return found;
 }
 
+export function reorderPagesForDrop(pages: ManualPage[], draggedId: string, targetId: string, position: PageDropPosition) {
+  if (draggedId === targetId) return null;
+  const flat = flattenPages(pages);
+  const dragged = flat.find((page) => page.id === draggedId);
+  const target = flat.find((page) => page.id === targetId);
+  if (!dragged || !target) return null;
+  if (descendantsOf(draggedId, pages).has(targetId)) return null;
+
+  const nextParentId = position === "inside" ? target.id : target.parentId ?? null;
+  const groups = new Map<string, FlatPage[]>();
+  for (const page of flat) {
+    if (page.id === draggedId) continue;
+    const parentKey = page.parentId ?? "";
+    groups.set(parentKey, [...(groups.get(parentKey) ?? []), page]);
+  }
+  for (const [parentKey, siblings] of groups) {
+    groups.set(parentKey, [...siblings].sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title)));
+  }
+
+  const targetKey = nextParentId ?? "";
+  const nextSiblings = [...(groups.get(targetKey) ?? [])];
+  const movedPage = { ...dragged, parentId: nextParentId };
+  if (position === "inside") {
+    nextSiblings.push(movedPage);
+  } else {
+    const targetIndex = nextSiblings.findIndex((page) => page.id === targetId);
+    if (targetIndex < 0) return null;
+    nextSiblings.splice(position === "before" ? targetIndex : targetIndex + 1, 0, movedPage);
+  }
+  groups.set(targetKey, nextSiblings);
+
+  return Array.from(groups.entries()).flatMap(([parentKey, siblings]) => (
+    siblings.map((page, index) => ({
+      id: page.id,
+      parentId: parentKey || null,
+      sortOrder: index + 1
+    }))
+  ));
+}
+
 function editableMarkdown(page?: ManualPage | null) {
   return page?.draftMarkdown ?? page?.publishedMarkdown ?? "";
 }
@@ -125,17 +192,18 @@ function editableRichHtml(page?: ManualPage | null) {
 export function ManualEditor({ slug }: { slug: string }) {
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
-  const [editSourceHtml, setEditSourceHtml] = useState("");
   const [editContentHtml, setEditContentHtml] = useState("");
-  const [editorMode, setEditorMode] = useState<"visual" | "source">("visual");
   const [editParentId, setEditParentId] = useState("");
   const [newPage, setNewPage] = useState(blankPage);
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
+  const [dropIntent, setDropIntent] = useState<{ targetId: string; position: PageDropPosition } | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const [commentBody, setCommentBody] = useState("");
   const [commentKind, setCommentKind] = useState<PageCommentKind>("comment");
   const [commentAnchor, setCommentAnchor] = useState("");
   const [commentAssigneeId, setCommentAssigneeId] = useState("");
   const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
+  const [inlineCommentDraft, setInlineCommentDraft] = useState<InlineCommentDraft | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -159,6 +227,7 @@ export function ManualEditor({ slug }: { slug: string }) {
     return Date.parse(b.createdAt) - Date.parse(a.createdAt);
   });
   const openCommentCount = selectedPageComments.filter((comment) => comment.status === "open").length;
+  const pinnedComments = selectedPageComments.filter((comment) => comment.sectionAnchor);
   const blockedParentIds = selectedPage ? descendantsOf(selectedPage.id, manual?.tableOfContents ?? manual?.pages ?? []) : new Set<string>();
   const signals = manual?.knowledgeSignals;
   const hasDraftChanges = hasUnpublishedChanges(flatPages);
@@ -180,13 +249,13 @@ export function ManualEditor({ slug }: { slug: string }) {
   useEffect(() => {
     const richHtml = editableRichHtml(selectedPage);
     setEditTitle(selectedPage?.title ?? "");
-    setEditSourceHtml(richHtml);
     setEditContentHtml(richHtml);
     setEditParentId(selectedPage?.parentId ?? "");
     setCommentAnchor("");
     setCommentBody("");
     setCommentAssigneeId("");
     setMentionUserIds([]);
+    setInlineCommentDraft(null);
   }, [selectedPage]);
 
   async function refresh(statusMessage?: string) {
@@ -236,7 +305,7 @@ export function ManualEditor({ slug }: { slug: string }) {
   async function savePage(event: React.FormEvent) {
     event.preventDefault();
     if (!selectedPage) return;
-    const contentHtml = editorMode === "source" ? sanitizeRichHtml(editSourceHtml) : sanitizeRichHtml(editContentHtml);
+    const contentHtml = sanitizeRichHtml(editContentHtml);
     await run("save-page", async () => api(`/pages/${selectedPage.id}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -257,23 +326,23 @@ export function ManualEditor({ slug }: { slug: string }) {
     setSelectedPageId(null);
   }
 
-  async function moveSelected(direction: -1 | 1) {
-    if (!selectedPage) return;
-    const siblings = flatPages
-      .filter((page) => (page.parentId ?? "") === (selectedPage.parentId ?? ""))
-      .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
-    const index = siblings.findIndex((page) => page.id === selectedPage.id);
-    const swapIndex = index + direction;
-    if (index < 0 || swapIndex < 0 || swapIndex >= siblings.length) return;
+  async function reorderPages(draggedId: string, targetId: string, position: PageDropPosition) {
+    const pages = manual?.tableOfContents ?? manual?.pages ?? [];
+    const reordered = reorderPagesForDrop(pages, draggedId, targetId, position);
+    if (!reordered) return;
 
-    const reordered = [...siblings];
-    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
-    await run("reorder-page", async () => api(`/pages/${selectedPage.id}/reorder`, {
+    await run("reorder-page", async () => api(`/pages/${draggedId}/reorder`, {
       method: "POST",
-      body: JSON.stringify({
-        pages: reordered.map((page, sortOrder) => ({ id: page.id, parentId: page.parentId ?? null, sortOrder: sortOrder + 1 }))
-      })
-    }), "Page order updated.");
+      body: JSON.stringify({ pages: reordered })
+    }), position === "inside" ? "Page nested." : "Page order updated.");
+  }
+
+  function getDropPosition(event: React.DragEvent<HTMLElement>): PageDropPosition {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offset = event.clientY - rect.top;
+    if (offset < rect.height * 0.28) return "before";
+    if (offset > rect.height * 0.72) return "after";
+    return "inside";
   }
 
   async function lifecycle(action: LifecycleAction) {
@@ -321,6 +390,23 @@ export function ManualEditor({ slug }: { slug: string }) {
     setCommentKind("comment");
   }
 
+  async function createInlineComment(draft: InlineCommentDraft) {
+    if (!selectedPage || !draft.body.trim()) return;
+    await run("create-inline-comment", async () => api(`/pages/${selectedPage.id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: draft.body.trim(),
+        kind: draft.kind,
+        sectionAnchor: draft.anchor,
+        assignedToId: commentAssigneeId || null,
+        mentionUserIds
+      })
+    }), draft.kind === "change_request" ? "Inline change request pinned." : "Inline comment pinned.");
+    setInlineCommentDraft(null);
+    setCommentAssigneeId("");
+    setMentionUserIds([]);
+  }
+
   async function updatePageComment(comment: PageComment, status: "open" | "resolved") {
     if (!selectedPage) return;
     await run(`comment-${comment.id}`, async () => api(`/pages/${selectedPage.id}/comments/${comment.id}`, {
@@ -346,7 +432,6 @@ export function ManualEditor({ slug }: { slug: string }) {
       <div className="flex flex-col gap-4 rounded-lg border border-line bg-white p-5 shadow-sm xl:flex-row xl:items-start xl:justify-between">
         <div>
           <div className="flex flex-wrap gap-2">
-            <Badge value={manual.status} />
             <Badge value={manual.visibility} />
             <span className="rounded-full border border-line bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">v{manual.version}</span>
           </div>
@@ -386,6 +471,8 @@ export function ManualEditor({ slug }: { slug: string }) {
         </div>
       </div>
 
+      <GovernanceProgress status={manual.status} reviewState={manual.reviewState} />
+
       {message ? <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">{message}</div> : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -395,23 +482,6 @@ export function ManualEditor({ slug }: { slug: string }) {
               <Pencil size={17} /> Smart visual editor
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  if (editorMode === "visual") {
-                    setEditSourceHtml(sanitizeRichHtml(editContentHtml));
-                    setEditorMode("source");
-                  } else {
-                    const contentHtml = sanitizeRichHtml(editSourceHtml);
-                    setEditContentHtml(contentHtml);
-                    setEditorMode("visual");
-                  }
-                }}
-                disabled={!selectedPage || Boolean(busy)}
-              >
-                <Code2 size={16} /> {editorMode === "visual" ? "HTML" : "Visual"}
-              </Button>
               <Button type="submit" disabled={!selectedPage || Boolean(busy)}>
                 {busy === "save-page" ? <Loader2 className="animate-spin" size={16} /> : <Pencil size={16} />} Save draft
               </Button>
@@ -446,19 +516,25 @@ export function ManualEditor({ slug }: { slug: string }) {
                   </select>
                 </label>
               </div>
-              {editorMode === "visual" ? (
-                <RichManualEditor value={editContentHtml} onChange={setEditContentHtml} placeholder="Write the manual page..." mediaVisibility={manual.visibility} />
-              ) : (
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-700">HTML source</span>
-                  <textarea
-                    value={editSourceHtml}
-                    onChange={(event) => setEditSourceHtml(event.target.value)}
-                    className="mt-1 min-h-[520px] w-full rounded-md border border-line bg-slate-950 px-4 py-3 font-mono text-sm leading-6 text-slate-50 outline-none focus:border-slate-400"
-                    spellCheck={false}
+              <div className="overflow-hidden rounded-lg border border-line bg-white">
+                <div className="border-b border-line bg-slate-50 px-5 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Page</p>
+                  <h2 className="mt-1 text-xl font-semibold text-slate-950">{editTitle || selectedPage.title}</h2>
+                </div>
+                <div className="p-5">
+                  <RichManualEditor
+                    value={editContentHtml}
+                    onChange={setEditContentHtml}
+                    placeholder="Write the manual page..."
+                    mediaVisibility={manual.visibility}
+                    pinnedComments={pinnedComments}
+                    inlineCommentDraft={inlineCommentDraft}
+                    onInlineCommentDraft={setInlineCommentDraft}
+                    onCreateInlineComment={createInlineComment}
+                    onCancelInlineComment={() => setInlineCommentDraft(null)}
                   />
-                </label>
-              )}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="p-10 text-center text-sm text-slate-500">Select or create a page to edit.</div>
@@ -472,11 +548,43 @@ export function ManualEditor({ slug }: { slug: string }) {
                 <button
                   key={page.id}
                   type="button"
+                  draggable
+                  onDragStart={(event) => {
+                    setDraggedPageId(page.id);
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", page.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedPageId(null);
+                    setDropIntent(null);
+                  }}
+                  onDragOver={(event) => {
+                    const pages = manual?.tableOfContents ?? manual?.pages ?? [];
+                    if (!draggedPageId || draggedPageId === page.id || descendantsOf(draggedPageId, pages).has(page.id)) return;
+                    event.preventDefault();
+                    const position = getDropPosition(event);
+                    event.dataTransfer.dropEffect = "move";
+                    setDropIntent({ targetId: page.id, position });
+                  }}
+                  onDragLeave={() => setDropIntent((intent) => intent?.targetId === page.id ? null : intent)}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const sourceId = event.dataTransfer.getData("text/plain") || draggedPageId;
+                    const position = dropIntent?.targetId === page.id ? dropIntent.position : getDropPosition(event);
+                    setDraggedPageId(null);
+                    setDropIntent(null);
+                    if (sourceId) void reorderPages(sourceId, page.id, position);
+                  }}
                   onClick={() => setSelectedPageId(page.id)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition ${selectedPage?.id === page.id ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"}`}
+                  className={`relative flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition ${selectedPage?.id === page.id ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"} ${draggedPageId === page.id ? "opacity-45" : ""} ${dropIntent?.targetId === page.id && dropIntent.position === "inside" ? "ring-2 ring-emerald-300" : ""}`}
                   style={{ paddingLeft: `${12 + page.depth * 18}px` }}
                 >
-                  <span className="truncate">{page.title}</span>
+                  {dropIntent?.targetId === page.id && dropIntent.position === "before" ? <span className="absolute inset-x-2 top-0 h-0.5 rounded-full bg-emerald-400" /> : null}
+                  {dropIntent?.targetId === page.id && dropIntent.position === "after" ? <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-emerald-400" /> : null}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <GripVertical size={14} className="shrink-0 opacity-60" />
+                    <span className="truncate">{page.title}</span>
+                  </span>
                   <span className="flex shrink-0 items-center gap-1 text-xs opacity-70">
                     {page.comments?.some((comment) => comment.status === "open") ? <MessageSquarePlus size={12} /> : null}
                     {page.assignedOwner ? <UserRound size={12} /> : null}
@@ -487,14 +595,7 @@ export function ManualEditor({ slug }: { slug: string }) {
                 <p className="rounded-md border border-dashed border-line p-4 text-sm text-slate-500">Create the first page to start drafting.</p>
               )}
             </div>
-            <div className="mt-4 flex gap-2">
-              <Button variant="secondary" className="flex-1" onClick={() => moveSelected(-1)} disabled={!selectedPage || Boolean(busy)}>
-                <ArrowUp size={16} /> Up
-              </Button>
-              <Button variant="secondary" className="flex-1" onClick={() => moveSelected(1)} disabled={!selectedPage || Boolean(busy)}>
-                <ArrowDown size={16} /> Down
-              </Button>
-            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-500">Drag a page above or below another page to reorder it, or drop in the center of a row to nest it.</p>
           </CollapsiblePanel>
 
           <CollapsiblePanel title="New page" icon={<FilePlus2 size={17} />}>
@@ -703,18 +804,56 @@ function CollapsiblePanel({
   );
 }
 
+function GovernanceProgress({ status, reviewState }: { status: Manual["status"]; reviewState?: string }) {
+  const steps = governanceStepsForStatus(status, reviewState);
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+          <GitBranch size={17} /> Review workflow
+        </div>
+        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{humanizeStatus(status)}</span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-5">
+        {steps.map((step, index) => (
+          <div key={step.id} className="relative">
+            {index > 0 ? <div className={`absolute -left-3 top-4 hidden h-0.5 w-3 md:block ${step.state === "upcoming" ? "bg-slate-200" : "bg-emerald-400"}`} /> : null}
+            <div className={`flex items-center gap-3 rounded-md border px-3 py-2 ${step.state === "active" ? "border-emerald-300 bg-emerald-50 text-emerald-950" : step.state === "complete" ? "border-emerald-200 bg-white text-slate-900" : "border-line bg-slate-50 text-slate-500"}`}>
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.state === "upcoming" ? "bg-white text-slate-400" : "bg-emerald-500 text-white"}`}>
+                {step.state === "complete" ? <CheckCircle2 size={15} /> : index + 1}
+              </span>
+              <span className="min-w-0 text-sm font-semibold">{step.label}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function RichManualEditor({
   value,
   onChange,
   placeholder,
   mediaVisibility = "internal",
-  compact = false
+  compact = false,
+  pinnedComments = [],
+  inlineCommentDraft,
+  onInlineCommentDraft,
+  onCreateInlineComment,
+  onCancelInlineComment
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   mediaVisibility?: Visibility;
   compact?: boolean;
+  pinnedComments?: PageComment[];
+  inlineCommentDraft?: InlineCommentDraft | null;
+  onInlineCommentDraft?: (draft: InlineCommentDraft) => void;
+  onCreateInlineComment?: (draft: InlineCommentDraft) => void | Promise<void>;
+  onCancelInlineComment?: () => void;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -727,6 +866,8 @@ function RichManualEditor({
   const [videoDraft, setVideoDraft] = useState<{ open: boolean; url: string }>({ open: false, url: "" });
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [selectionAction, setSelectionAction] = useState<{ top: number; left: number; quote: string } | null>(null);
+  const selectionRangeRef = useRef<Range | null>(null);
   const visibleSlashCommands = slashCommandsForQuery(slashQuery ?? "");
 
   useEffect(() => {
@@ -756,6 +897,59 @@ function RichManualEditor({
     editorRef.current?.focus();
     document.execCommand("insertHTML", false, sanitizeRichHtml(html));
     sync();
+  }
+
+  function updateSelectionAction() {
+    if (compact || !onInlineCommentDraft) return;
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount || selection.isCollapsed) {
+      setSelectionAction(null);
+      selectionRangeRef.current = null;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) {
+      setSelectionAction(null);
+      selectionRangeRef.current = null;
+      return;
+    }
+    const quote = selection.toString().trim().replace(/\s+/g, " ");
+    if (!quote) {
+      setSelectionAction(null);
+      selectionRangeRef.current = null;
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    const host = editor.getBoundingClientRect();
+    selectionRangeRef.current = range.cloneRange();
+    setSelectionAction({
+      quote: quote.slice(0, 180),
+      left: editor.offsetLeft + Math.min(Math.max(rect.left - host.left + rect.width / 2, 24), host.width - 24),
+      top: editor.offsetTop + Math.max(rect.top - host.top - 44, 8)
+    });
+  }
+
+  function startInlineComment() {
+    const editor = editorRef.current;
+    const range = selectionRangeRef.current;
+    if (!editor || !range || !onInlineCommentDraft) return;
+
+    const anchor = `pin-${Date.now().toString(36)}`;
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    const quote = range.toString().trim().replace(/\s+/g, " ");
+    document.execCommand(
+      "insertHTML",
+      false,
+      `<span class="manual-inline-comment-anchor" data-comment-anchor="${anchor}">${escapeEditorText(range.toString())}</span>`
+    );
+    sync();
+    setSelectionAction(null);
+    selectionRangeRef.current = null;
+    onInlineCommentDraft({ anchor, quote: quote.slice(0, 180), body: "", kind: "comment" });
+    window.setTimeout(() => document.getElementById("inline-comment-body")?.focus(), 0);
   }
 
   function getSlashQuery() {
@@ -936,6 +1130,7 @@ function RichManualEditor({
 
   function handleEditorClick(event: React.MouseEvent<HTMLDivElement>) {
     setSlashQuery(null);
+    updateSelectionAction();
     const target = event.target;
     if (target instanceof HTMLImageElement || target instanceof HTMLVideoElement) {
       setSelectedMediaElement(target);
@@ -1010,10 +1205,75 @@ function RichManualEditor({
         onBlur={sync}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
+        onMouseUp={updateSelectionAction}
         onPaste={handlePaste}
         onClick={handleEditorClick}
-        className={`manual-editor-surface manual-content px-4 py-3 text-sm leading-7 outline-none focus:bg-white ${compact ? "min-h-[130px]" : "min-h-[520px]"}`}
+        className={`manual-editor-surface manual-content relative px-4 py-3 text-sm leading-7 outline-none focus:bg-white ${compact ? "min-h-[130px]" : "min-h-[520px]"}`}
       />
+      {selectionAction ? (
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={startInlineComment}
+          className="absolute z-30 inline-flex h-9 items-center gap-2 rounded-md bg-slate-950 px-3 text-xs font-semibold text-white shadow-lg transition-all duration-200 ease-in-out hover:scale-[1.02] hover:bg-emerald-700"
+          style={{ left: selectionAction.left, top: selectionAction.top, transform: "translateX(-50%)" }}
+          title={selectionAction.quote}
+        >
+          <MessageSquarePlus size={14} /> Comment
+        </button>
+      ) : null}
+      {!compact && pinnedComments.length ? (
+        <div className="border-t border-line bg-slate-50 px-4 py-3">
+          <div className="flex flex-wrap gap-2">
+            {pinnedComments.slice(0, 4).map((comment) => (
+              <button
+                key={comment.id}
+                type="button"
+                onClick={() => {
+                  const anchor = editorRef.current?.querySelector<HTMLElement>(`[data-comment-anchor="${comment.sectionAnchor}"]`);
+                  anchor?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+                className="inline-flex max-w-full items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 transition-all duration-200 ease-in-out hover:border-amber-300 hover:bg-amber-100"
+              >
+                <MessageSquarePlus size={12} />
+                <span className="truncate">{comment.sectionAnchor}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {inlineCommentDraft ? (
+        <div className="border-t border-line bg-white p-4">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-amber-950">Pinned inline comment</p>
+                <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-800">&quot;{inlineCommentDraft.quote}&quot;</p>
+              </div>
+              <select
+                value={inlineCommentDraft.kind}
+                onChange={(event) => onInlineCommentDraft?.({ ...inlineCommentDraft, kind: event.target.value as PageCommentKind })}
+                className="h-9 rounded-md border border-amber-200 bg-white px-2 text-xs font-semibold text-amber-950"
+              >
+                <option value="comment">Comment</option>
+                <option value="reviewer_note">Reviewer note</option>
+                <option value="change_request">Change request</option>
+              </select>
+            </div>
+            <textarea
+              id="inline-comment-body"
+              value={inlineCommentDraft.body}
+              onChange={(event) => onInlineCommentDraft?.({ ...inlineCommentDraft, body: event.target.value })}
+              placeholder="Write a pinned note..."
+              className="mt-3 min-h-20 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={onCancelInlineComment}>Cancel</Button>
+              <Button type="button" onClick={() => onCreateInlineComment?.(inlineCommentDraft)} disabled={!inlineCommentDraft.body.trim()}>Pin comment</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {slashQuery !== null && visibleSlashCommands.length ? (
         <div className="absolute left-3 top-14 z-20 w-[min(22rem,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-line bg-white shadow-xl">
           <div className="border-b border-line px-3 py-2 text-xs font-semibold text-slate-500">Insert block</div>
