@@ -68,7 +68,19 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-body), Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.font-heading {
+  font-family: var(--font-heading), Outfit, var(--font-body), Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0;
 }
 
 input,
@@ -168,18 +180,24 @@ a {
   overflow-x: auto;
   border-radius: 8px;
   background: #0f172a;
-  padding: 1rem;
+  padding: 2.75rem 1rem 1rem;
   color: #f8fafc;
 }
 
 .manual-content pre[data-language]::before {
   content: attr(data-language);
-  display: block;
-  margin-bottom: 0.75rem;
-  color: #94a3b8;
-  font-size: 0.72rem;
+  position: absolute;
+  left: 0.75rem;
+  top: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  padding: 0.18rem 0.55rem;
+  color: #cbd5e1;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
+  line-height: 1.35;
   text-transform: uppercase;
 }
 
@@ -187,6 +205,42 @@ a {
   background: transparent;
   padding: 0;
   color: inherit;
+}
+
+.manual-code-copy {
+  position: absolute;
+  right: 0.75rem;
+  top: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.86);
+  padding: 0.28rem 0.6rem;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 200ms ease-in-out;
+}
+
+.manual-content pre:hover .manual-code-copy,
+.manual-content pre:focus-within .manual-code-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.manual-code-copy:hover,
+.manual-code-copy:focus-visible,
+.manual-code-copy[data-state="copied"] {
+  border-color: #34d399;
+  background: #020617;
+  color: #ffffff;
+}
+
+.manual-code-copy[data-state="error"] {
+  border-color: #fca5a5;
+  color: #fecaca;
 }
 
 .manual-content .syntax-keyword {
@@ -427,6 +481,26 @@ html[data-theme="dark"] .manual-content li {
 html[data-theme="dark"] .manual-content code {
   background: var(--surface-subtle);
   color: var(--text-strong);
+}
+
+html[data-theme="dark"] .manual-content pre code {
+  background: transparent;
+  color: inherit;
+}
+
+html[data-theme="dark"] .manual-content pre[data-language]::before,
+html[data-theme="dark"] .manual-code-copy {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: rgba(2, 6, 23, 0.92);
+  color: #e2e8f0;
+}
+
+html[data-theme="dark"] .manual-code-copy:hover,
+html[data-theme="dark"] .manual-code-copy:focus-visible,
+html[data-theme="dark"] .manual-code-copy[data-state="copied"] {
+  border-color: #34d399;
+  background: #020617;
+  color: #ffffff;
 }
 
 html[data-theme="dark"] .manual-content blockquote,
@@ -764,5 +838,9 @@ html[data-theme="dark"] .text-violet-700 {
     content: " (" attr(href) ")";
     color: #64748b;
     font-size: 8pt;
+  }
+
+  .manual-code-copy {
+    display: none !important;
   }
 }

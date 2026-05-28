@@ -114,4 +114,24 @@ describe("ReaderLayout", () => {
     expect(html).toContain("manual-mermaid");
     expect(html).toContain("flowchart TD");
   });
+
+  it("adds copy controls and language badges to rendered code blocks", () => {
+    const html = renderToString(
+      <ReaderLayout
+        manual={{
+          ...manual,
+          tableOfContents: [
+            {
+              ...manual.tableOfContents![0],
+              publishedMarkdown: "```shell\nnpm run dev\n```"
+            }
+          ]
+        }}
+      />
+    ).replaceAll("<!-- -->", "");
+
+    expect(html).toContain('data-language="shell"');
+    expect(html).toContain("data-manual-code-copy");
+    expect(html).toContain("Copy code");
+  });
 });

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added hoverable Copy Code controls and clearer language badges for reader code blocks.
+- Loaded Inter for body copy and Outfit for headings through Next font optimization.
 - Added smoother micro-interactions and scale/shadow hover treatments for manual cards and shared interactive surfaces.
 - Added environment-configured OIDC SSO sign-in for Google Workspace, Microsoft Entra ID, Okta, and Keycloak.
 - Added a global Cmd/Ctrl+K quick search overlay with keyboard navigation, recent searches, and snippet-derived answers.

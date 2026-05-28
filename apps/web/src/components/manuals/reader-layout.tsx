@@ -26,6 +26,17 @@ function copyCurrentUrlWithHash(hash: string) {
   void navigator.clipboard?.writeText(url);
 }
 
+function codeCopyHtml() {
+  return '<button type="button" class="manual-code-copy" data-manual-code-copy aria-label="Copy code">Copy code</button>';
+}
+
+function withCodeCopyButtons(html: string) {
+  return html.replace(/<pre\b([^>]*)>([\s\S]*?)<\/pre>/gi, (match, attrs: string, content: string) => {
+    if (content.includes("data-manual-code-copy")) return match;
+    return `<pre${attrs}>${content}${codeCopyHtml()}</pre>`;
+  });
+}
+
 type MermaidApi = {
   initialize: (config: Record<string, unknown>) => void;
   render: (id: string, chart: string) => Promise<{ svg: string }> | { svg: string };
@@ -66,6 +77,7 @@ function loadMermaid() {
 
 function RenderedManualContent({ html }: { html: string }) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const enhancedHtml = useMemo(() => withCodeCopyButtons(html), [html]);
 
   useEffect(() => {
     const root = contentRef.current;
@@ -97,7 +109,31 @@ function RenderedManualContent({ html }: { html: string }) {
     };
   }, [html]);
 
-  return <div ref={contentRef} dangerouslySetInnerHTML={{ __html: html }} />;
+  async function handleCodeCopy(event: React.MouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement | null;
+    const button = target?.closest<HTMLButtonElement>("[data-manual-code-copy]");
+    if (!button || !contentRef.current?.contains(button)) return;
+
+    const code = button.closest("pre")?.querySelector("code")?.textContent ?? "";
+    window.clearTimeout(Number(button.dataset.resetTimer || 0));
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(code);
+      button.textContent = "Copied";
+      button.dataset.state = "copied";
+    } catch {
+      button.textContent = "Copy failed";
+      button.dataset.state = "error";
+    }
+    const resetTimer = window.setTimeout(() => {
+      button.textContent = "Copy code";
+      button.removeAttribute("data-state");
+      button.removeAttribute("data-reset-timer");
+    }, 1400);
+    button.dataset.resetTimer = String(resetTimer);
+  }
+
+  return <div ref={contentRef} onClick={handleCodeCopy} dangerouslySetInnerHTML={{ __html: enhancedHtml }} />;
 }
 
 function PageSection({ page, onCopy }: { page: ManualPage; onCopy: (hash: string, label: string) => void }) {
