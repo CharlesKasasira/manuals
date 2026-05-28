@@ -176,6 +176,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <p className="text-xs text-slate-500">Draft, review, publish, search, and audit manuals.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button type="button" onClick={() => window.dispatchEvent(new Event("manualflow:open-quick-search"))} className="hidden h-10 items-center gap-2 rounded-md border border-line bg-slate-50 px-3 text-sm font-semibold text-slate-500 hover:bg-white md:inline-flex">
+              Search <kbd className="rounded border border-line bg-white px-1.5 py-0.5 text-[10px]">Cmd K</kbd>
+            </button>
             <ThemeToggle />
             <Link href="/" className="rounded-md border border-line px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
               Public reader

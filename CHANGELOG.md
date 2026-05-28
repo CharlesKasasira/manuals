@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a global Cmd/Ctrl+K quick search overlay with keyboard navigation, recent searches, and snippet-derived answers.
+- Added a real server-side manual PDF export route and replaced the reader PDF button's print-dialog shortcut.
+- Improved print styles with cover pages, page breaks, widows/orphans, hidden chrome, and page counters.
 - Added reader support for Mermaid diagram blocks, directive callouts, details panels, and richer tab/code groups.
 - Added slash-command inserts for rich manual blocks, including warnings, code, images, tables, and code tab switchers.
 - Hid admin-only navigation items from users without admin access.

@@ -20,6 +20,9 @@ export function Topbar() {
               placeholder="Search manuals, policies, runbooks..."
               className="h-10 w-full rounded-md border border-line bg-slate-50 pl-10 pr-3 text-sm outline-none focus:border-slate-400 focus:bg-white"
             />
+            <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-line bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 lg:inline-flex">
+              Cmd K
+            </kbd>
           </label>
         </form>
         <div className="flex items-center gap-2">
