@@ -1,12 +1,12 @@
 "use client";
 
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Route } from "next";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BookOpen, Eye, EyeOff, Home, Mail } from "lucide-react";
-import { api, setToken } from "@/lib/api";
+import { BookOpen, Eye, EyeOff, Home, KeyRound, Mail } from "lucide-react";
+import { API_URL, api, setToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -14,6 +14,7 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const resetToken = searchParams.get("resetToken") ?? "";
+  const ssoToken = searchParams.get("ssoToken") ?? "";
   const nextPath = searchParams.get("next") ?? "/app";
   const [email, setEmail] = useState("admin@manualflow.local");
   const [password, setPassword] = useState("Manuals123!");
@@ -22,6 +23,27 @@ export function LoginForm() {
   const [showResetRequest, setShowResetRequest] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [ssoProviders, setSsoProviders] = useState<Array<{ id: string; label: string; type: string; enabled: boolean }>>([]);
+
+  useEffect(() => {
+    if (!ssoToken) return;
+    setToken(ssoToken);
+    router.replace((nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/app") as Route);
+  }, [nextPath, router, ssoToken]);
+
+  useEffect(() => {
+    let active = true;
+    api<{ data: Array<{ id: string; label: string; type: string; enabled: boolean }> }>("/auth/sso/providers")
+      .then((response) => {
+        if (active) setSsoProviders(response.data.filter((provider) => provider.enabled));
+      })
+      .catch(() => {
+        if (active) setSsoProviders([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -96,6 +118,25 @@ export function LoginForm() {
             <p className="text-sm text-slate-500">{resetToken ? "Choose a new password." : showResetRequest ? "Receive a reset link by email." : "Sign in to manage manuals."}</p>
           </div>
         </div>
+        {!resetToken && !showResetRequest && ssoProviders.length ? (
+          <div className="mb-5 space-y-2">
+            {ssoProviders.map((provider) => (
+              <a
+                key={provider.id}
+                href={`${API_URL}/auth/sso/${encodeURIComponent(provider.id)}/start?next=${encodeURIComponent(nextPath)}`}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-line bg-slate-50 px-3 text-sm font-semibold text-slate-800 transition hover:bg-white"
+              >
+                <KeyRound size={16} />
+                Continue with {provider.label}
+              </a>
+            ))}
+            <div className="flex items-center gap-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <span className="h-px flex-1 bg-line" />
+              Password
+              <span className="h-px flex-1 bg-line" />
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-4">
           {resetToken ? (
             <label className="block">

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added smoother micro-interactions and scale/shadow hover treatments for manual cards and shared interactive surfaces.
+- Added environment-configured OIDC SSO sign-in for Google Workspace, Microsoft Entra ID, Okta, and Keycloak.
 - Added a global Cmd/Ctrl+K quick search overlay with keyboard navigation, recent searches, and snippet-derived answers.
 - Added a real server-side manual PDF export route and replaced the reader PDF button's print-dialog shortcut.
 - Improved print styles with cover pages, page breaks, widows/orphans, hidden chrome, and page counters.

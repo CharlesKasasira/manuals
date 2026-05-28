@@ -13,8 +13,8 @@ export function ManualCard({ manual, hrefPrefix = "/manuals" }: { manual: Manual
   const pageCount = signals?.pageCount ?? manual.pages?.length ?? 0;
 
   return (
-    <Link href={`${hrefPrefix}/${manual.slug}` as Route}>
-      <Card className="transition hover:border-emerald-400 hover:shadow-soft">
+    <Link href={`${hrefPrefix}/${manual.slug}` as Route} className="group block focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+      <Card className="transform-gpu transition-all duration-200 ease-in-out group-hover:scale-[1.02] group-hover:border-emerald-400 group-hover:shadow-lg">
         <CardContent>
           <div className="flex flex-col gap-4">
             <div className="flex flex-wrap gap-2">
@@ -51,7 +51,7 @@ export function ManualCard({ manual, hrefPrefix = "/manuals" }: { manual: Manual
                   <span key={tag.id} className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">#{tag.name}</span>
                 ))}
               </div>
-              <ArrowRight size={17} className="text-slate-400" />
+              <ArrowRight size={17} className="text-slate-400 transition-all duration-200 ease-in-out group-hover:translate-x-1 group-hover:text-emerald-600" />
             </div>
           </div>
         </CardContent>

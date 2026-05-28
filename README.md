@@ -40,9 +40,14 @@ The seeded admin defaults to `admin@manualflow.local` / `Manuals123!`.
 ## Implemented MVP Surface
 
 - Auth: login, logout, current user, admin user creation.
+- SSO: generic OIDC sign-in for Google Workspace, Microsoft Entra ID, Okta, and Keycloak via environment-configured providers.
 - Manuals: create, update, list, read, delete, submit review, approve, request changes, publish, archive.
 - Pages: nested page creation, update, delete, reorder.
 - Assets: upload, list, download, usages, delete.
 - Public reader: published public manuals only.
 - Search: permission-aware MySQL-backed manual and asset search abstraction.
 - Governance: review queue, audit logs, manual analytics, notification outbox records.
+
+## SSO Configuration
+
+Set `SSO_OIDC_PROVIDERS` to a JSON object keyed by provider id, or use the single-provider `SSO_OIDC_*` variables in `.env.example`. Each provider needs `issuer`, `clientId`, `clientSecret`, and `redirectUri`. SAML 2.0 and LDAP can be added behind the same login UI later, but this implementation ships the OIDC path that covers Google Workspace, Entra ID, Okta, and Keycloak.

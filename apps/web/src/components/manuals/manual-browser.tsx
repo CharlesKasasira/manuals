@@ -268,7 +268,7 @@ function SearchResultCard({ manual, hrefPrefix, query }: { manual: SearchManual;
   const reasons = manual.rank.reasons.join(", ");
 
   return (
-    <article className="rounded-lg border border-line bg-white p-5 shadow-sm transition hover:border-emerald-300 hover:shadow-md">
+    <article className="transform-gpu rounded-lg border border-line bg-white p-5 shadow-sm transition-all duration-200 ease-in-out hover:scale-[1.02] hover:border-emerald-300 hover:shadow-lg">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <Link href={href as Route} className="group inline-flex items-center gap-2 text-lg font-semibold text-slate-950 hover:text-emerald-700">
@@ -283,14 +283,14 @@ function SearchResultCard({ manual, hrefPrefix, query }: { manual: SearchManual;
             <span>Matched by {reasons}</span>
           </div>
         </div>
-        <Link href={href as Route} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800">
+        <Link href={href as Route} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition-all duration-200 ease-in-out hover:bg-slate-800">
           Open result <ArrowUpRight size={15} />
         </Link>
       </div>
       {manual.matchedPages.length ? (
         <div className="mt-4 space-y-2 border-t border-line pt-4">
           {manual.matchedPages.slice(0, 3).map((page) => (
-            <Link key={page.id} href={`${hrefPrefix}/${manual.slug}#page-${page.slug}` as Route} className="block rounded-md border border-line bg-slate-50 p-3 hover:border-emerald-300 hover:bg-emerald-50">
+            <Link key={page.id} href={`${hrefPrefix}/${manual.slug}#page-${page.slug}` as Route} className="block rounded-md border border-line bg-slate-50 p-3 transition-all duration-200 ease-in-out hover:border-emerald-300 hover:bg-emerald-50">
               <span className="text-sm font-semibold text-slate-900">{highlight(page.title, query)}</span>
               <span className="mt-1 block text-sm leading-6 text-slate-600">{highlight(page.snippet, query)}</span>
             </Link>

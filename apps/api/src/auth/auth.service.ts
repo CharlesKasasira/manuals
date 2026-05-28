@@ -9,6 +9,31 @@ import { AuditService } from "../common/audit.service";
 import { MailService } from "../mail/mail.service";
 import { LoginDto, RegisterDto, RequestPasswordResetDto, ResetPasswordDto } from "./auth.dto";
 
+type SsoProviderType = "oidc" | "saml" | "ldap";
+
+type OidcProviderConfig = {
+  id: string;
+  label: string;
+  type: "oidc";
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  scopes?: string[];
+  role?: Role;
+  autoProvision?: boolean;
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  userinfoEndpoint?: string;
+};
+
+type SsoProviderSummary = {
+  id: string;
+  label: string;
+  type: SsoProviderType;
+  enabled: boolean;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -26,16 +51,95 @@ export class AuthService {
     const valid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!valid) throw new UnauthorizedException("Invalid credentials.");
 
-    const token = await this.jwt.signAsync(
-      { sub: user.id, role: user.role },
-      {
-        secret: this.config.get<string>("JWT_SECRET", "manualflow-dev-secret"),
-        expiresIn: "8h"
-      }
-    );
+    const token = await this.issueToken(user);
     await this.audit.record({ event: "login", actorId: user.id, ipAddress });
 
     return { token, user: this.serializeUser(user) };
+  }
+
+  ssoProviders(): SsoProviderSummary[] {
+    return this.oidcProviders().map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      type: provider.type,
+      enabled: true
+    }));
+  }
+
+  async ssoStart(providerId: string, next = "/app") {
+    const provider = this.requireOidcProvider(providerId);
+    const state = await this.jwt.signAsync(
+      {
+        purpose: "sso",
+        provider: provider.id,
+        next: this.safeNextPath(next),
+        nonce: randomBytes(12).toString("base64url")
+      },
+      {
+        secret: this.config.get<string>("JWT_SECRET", "manualflow-dev-secret"),
+        expiresIn: "10m"
+      }
+    );
+    const discovery = await this.oidcDiscovery(provider);
+    const url = new URL(discovery.authorizationEndpoint);
+    url.searchParams.set("client_id", provider.clientId);
+    url.searchParams.set("redirect_uri", provider.redirectUri);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", (provider.scopes ?? ["openid", "email", "profile"]).join(" "));
+    url.searchParams.set("state", state);
+    return { url: url.toString() };
+  }
+
+  async ssoCallback(providerId: string, code: string, state: string, ipAddress?: string) {
+    const provider = this.requireOidcProvider(providerId);
+    const statePayload = await this.jwt.verifyAsync(state, {
+      secret: this.config.get<string>("JWT_SECRET", "manualflow-dev-secret")
+    }).catch(() => null) as { purpose?: string; provider?: string; next?: string } | null;
+    if (statePayload?.purpose !== "sso" || statePayload.provider !== provider.id) {
+      throw new UnauthorizedException("Invalid SSO state.");
+    }
+
+    const discovery = await this.oidcDiscovery(provider);
+    const tokenResponse = await fetch(discovery.tokenEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: provider.redirectUri,
+        client_id: provider.clientId,
+        client_secret: provider.clientSecret
+      })
+    });
+    if (!tokenResponse.ok) throw new UnauthorizedException("SSO token exchange failed.");
+    const tokenData = await tokenResponse.json() as { access_token?: string };
+    if (!tokenData.access_token) throw new UnauthorizedException("SSO provider did not return an access token.");
+
+    const userInfoResponse = await fetch(discovery.userinfoEndpoint, {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: "application/json" }
+    });
+    if (!userInfoResponse.ok) throw new UnauthorizedException("Could not load SSO user profile.");
+    const profile = await userInfoResponse.json() as { email?: string; email_verified?: boolean; name?: string; given_name?: string; family_name?: string; preferred_username?: string };
+    const email = profile.email?.trim().toLowerCase();
+    if (!email || profile.email_verified === false) throw new UnauthorizedException("SSO profile must include a verified email.");
+
+    let user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user && provider.autoProvision !== false) {
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          name: profile.name || [profile.given_name, profile.family_name].filter(Boolean).join(" ") || profile.preferred_username || email,
+          passwordHash: await bcrypt.hash(randomBytes(32).toString("base64url"), 12),
+          role: provider.role ?? Role.user
+        }
+      });
+      await this.audit.record({ event: "user_created", actorId: user.id, entityType: "user", entityId: user.id, metadata: { email, role: user.role, source: `sso:${provider.id}` } });
+    }
+    if (!user || !user.isActive) throw new UnauthorizedException("SSO account is not allowed.");
+
+    const token = await this.issueToken(user);
+    await this.audit.record({ event: "login", actorId: user.id, ipAddress, metadata: { source: `sso:${provider.id}` } });
+    return { token, user: this.serializeUser(user), next: this.safeNextPath(statePayload.next ?? "/app") };
   }
 
   async logout(userId?: string | null, ipAddress?: string) {
@@ -116,5 +220,98 @@ export class AuthService {
 
   hashToken(token: string) {
     return createHash("sha256").update(token).digest("hex");
+  }
+
+  loginRedirectUrl() {
+    return this.mail.appUrl("/login");
+  }
+
+  private async issueToken(user: { id: string; role: Role }) {
+    return this.jwt.signAsync(
+      { sub: user.id, role: user.role },
+      {
+        secret: this.config.get<string>("JWT_SECRET", "manualflow-dev-secret"),
+        expiresIn: "8h"
+      }
+    );
+  }
+
+  private oidcProviders(): OidcProviderConfig[] {
+    const raw = this.config.get<string>("SSO_OIDC_PROVIDERS");
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as Array<Partial<OidcProviderConfig>> | Record<string, Partial<OidcProviderConfig>>;
+        const values = Array.isArray(parsed) ? parsed : Object.entries(parsed).map(([id, value]) => ({ id, ...value }));
+        return values.map((provider) => this.normalizeOidcProvider(provider)).filter((provider): provider is OidcProviderConfig => Boolean(provider));
+      } catch {
+        return [];
+      }
+    }
+
+    const issuer = this.config.get<string>("SSO_OIDC_ISSUER");
+    const clientId = this.config.get<string>("SSO_OIDC_CLIENT_ID");
+    const clientSecret = this.config.get<string>("SSO_OIDC_CLIENT_SECRET");
+    const redirectUri = this.config.get<string>("SSO_OIDC_REDIRECT_URI");
+    if (!issuer || !clientId || !clientSecret || !redirectUri) return [];
+    return [this.normalizeOidcProvider({
+      id: this.config.get<string>("SSO_OIDC_ID", "oidc"),
+      label: this.config.get<string>("SSO_OIDC_LABEL", "Single Sign-On"),
+      type: "oidc",
+      issuer,
+      clientId,
+      clientSecret,
+      redirectUri,
+      role: this.config.get<Role>("SSO_OIDC_DEFAULT_ROLE", Role.user)
+    })].filter((provider): provider is OidcProviderConfig => Boolean(provider));
+  }
+
+  private normalizeOidcProvider(provider: Partial<OidcProviderConfig>): OidcProviderConfig | null {
+    if (!provider.id || !provider.issuer || !provider.clientId || !provider.clientSecret || !provider.redirectUri) return null;
+    return {
+      id: provider.id,
+      label: provider.label || provider.id,
+      type: "oidc" as const,
+      issuer: provider.issuer.replace(/\/$/, ""),
+      clientId: provider.clientId,
+      clientSecret: provider.clientSecret,
+      redirectUri: provider.redirectUri,
+      scopes: provider.scopes,
+      role: provider.role ?? Role.user,
+      autoProvision: provider.autoProvision,
+      authorizationEndpoint: provider.authorizationEndpoint,
+      tokenEndpoint: provider.tokenEndpoint,
+      userinfoEndpoint: provider.userinfoEndpoint
+    };
+  }
+
+  private requireOidcProvider(providerId: string) {
+    const provider = this.oidcProviders().find((item) => item.id === providerId);
+    if (!provider) throw new BadRequestException("SSO provider is not configured.");
+    return provider;
+  }
+
+  private async oidcDiscovery(provider: OidcProviderConfig) {
+    if (provider.authorizationEndpoint && provider.tokenEndpoint && provider.userinfoEndpoint) {
+      return {
+        authorizationEndpoint: provider.authorizationEndpoint,
+        tokenEndpoint: provider.tokenEndpoint,
+        userinfoEndpoint: provider.userinfoEndpoint
+      };
+    }
+    const response = await fetch(`${provider.issuer}/.well-known/openid-configuration`, { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new BadRequestException("Could not discover SSO provider metadata.");
+    const metadata = await response.json() as { authorization_endpoint?: string; token_endpoint?: string; userinfo_endpoint?: string };
+    if (!metadata.authorization_endpoint || !metadata.token_endpoint || !metadata.userinfo_endpoint) {
+      throw new BadRequestException("SSO provider metadata is incomplete.");
+    }
+    return {
+      authorizationEndpoint: metadata.authorization_endpoint,
+      tokenEndpoint: metadata.token_endpoint,
+      userinfoEndpoint: metadata.userinfo_endpoint
+    };
+  }
+
+  private safeNextPath(value: string) {
+    return value.startsWith("/") && !value.startsWith("//") ? value : "/app";
   }
 }

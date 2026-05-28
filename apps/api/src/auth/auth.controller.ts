@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Redirect, Req, Res } from "@nestjs/common";
 import { Role } from "@prisma/client";
-import { Request } from "express";
+import { Request, Response } from "express";
 import { CurrentUser } from "../common/current-user.decorator";
 import { Public } from "../common/public.decorator";
 import { Roles } from "../common/roles.decorator";
@@ -15,6 +15,29 @@ export class AuthController {
   @Post("login")
   async login(@Body() dto: LoginDto, @Req() request: Request) {
     return { data: await this.auth.login(dto, request.ip) };
+  }
+
+  @Public()
+  @Get("sso/providers")
+  async ssoProviders() {
+    return { data: await this.auth.ssoProviders() };
+  }
+
+  @Public()
+  @Get("sso/:provider/start")
+  @Redirect()
+  async ssoStart(@Param("provider") provider: string, @Query("next") next = "/app") {
+    return { url: (await this.auth.ssoStart(provider, next)).url };
+  }
+
+  @Public()
+  @Get("sso/:provider/callback")
+  async ssoCallback(@Param("provider") provider: string, @Query("code") code: string, @Query("state") state: string, @Req() request: Request, @Res() res: Response) {
+    const result = await this.auth.ssoCallback(provider, code, state, request.ip);
+    const redirect = new URL(this.auth.loginRedirectUrl());
+    redirect.searchParams.set("ssoToken", result.token);
+    redirect.searchParams.set("next", result.next);
+    res.redirect(redirect.toString());
   }
 
   @Post("logout")
