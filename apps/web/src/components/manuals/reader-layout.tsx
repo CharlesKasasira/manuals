@@ -3,12 +3,11 @@
 import Link from "next/link";
 import type { Route } from "next";
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Copy, FileDown, Printer, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { htmlToText, pageMarkdown, pageRichHtml, richHtmlWithHeadingIds, slugify } from "@/lib/manual-content";
+import { htmlToText, markdownToHtml, pageMarkdown, pageRichHtml, richHtmlWithHeadingIds } from "@/lib/manual-content";
+import { API_URL, getToken } from "@/lib/api";
 import { Manual, ManualPage } from "@/lib/types";
 import { formatDate, humanizeStatus } from "@/lib/utils";
 import { ManualShareActions } from "./manual-share-actions";
@@ -27,14 +26,84 @@ function copyCurrentUrlWithHash(hash: string) {
   void navigator.clipboard?.writeText(url);
 }
 
+type MermaidApi = {
+  initialize: (config: Record<string, unknown>) => void;
+  render: (id: string, chart: string) => Promise<{ svg: string }> | { svg: string };
+};
+
+declare global {
+  interface Window {
+    mermaid?: MermaidApi;
+  }
+}
+
+let mermaidScriptPromise: Promise<MermaidApi | null> | null = null;
+
+function loadMermaid() {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (window.mermaid) return Promise.resolve(window.mermaid);
+  if (mermaidScriptPromise) return mermaidScriptPromise;
+
+  mermaidScriptPromise = new Promise((resolve) => {
+    const existing = document.querySelector<HTMLScriptElement>("script[data-manualflow-mermaid]");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.mermaid ?? null), { once: true });
+      existing.addEventListener("error", () => resolve(null), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+    script.async = true;
+    script.dataset.manualflowMermaid = "true";
+    script.onload = () => resolve(window.mermaid ?? null);
+    script.onerror = () => resolve(null);
+    document.head.appendChild(script);
+  });
+
+  return mermaidScriptPromise;
+}
+
+function RenderedManualContent({ html }: { html: string }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    const diagrams = Array.from(root.querySelectorAll<HTMLElement>(".manual-mermaid"));
+    if (!diagrams.length) return;
+
+    let cancelled = false;
+    void loadMermaid().then(async (mermaid) => {
+      if (!mermaid || cancelled) return;
+      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" });
+
+      for (const [index, diagram] of diagrams.entries()) {
+        const chart = diagram.dataset.chart || diagram.textContent || "";
+        if (!chart.trim() || diagram.dataset.rendered === "true") continue;
+        try {
+          const rendered = await mermaid.render(`manual-mermaid-${Date.now()}-${index}`, chart);
+          if (cancelled) return;
+          diagram.innerHTML = rendered.svg;
+          diagram.dataset.rendered = "true";
+        } catch {
+          diagram.classList.add("manual-mermaid-error");
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [html]);
+
+  return <div ref={contentRef} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 function PageSection({ page, onCopy }: { page: ManualPage; onCopy: (hash: string, label: string) => void }) {
   const richHtml = pageRichHtml(page);
   const markdown = pageMarkdown(page) || "_No content yet._";
-  const headingComponents = {
-    h1: ({ children }: { children?: React.ReactNode }) => <h2 id={`${page.slug}-${slugify(children)}`}>{children}</h2>,
-    h2: ({ children }: { children?: React.ReactNode }) => <h3 id={`${page.slug}-${slugify(children)}`}>{children}</h3>,
-    h3: ({ children }: { children?: React.ReactNode }) => <h4 id={`${page.slug}-${slugify(children)}`}>{children}</h4>
-  };
+  const renderedHtml = richHtml ? richHtmlWithHeadingIds(richHtml, page.slug) : richHtmlWithHeadingIds(markdownToHtml(markdown), page.slug);
 
   return (
     <section id={`page-${page.slug}`} className="scroll-mt-24 border-b border-line last:border-b-0">
@@ -54,11 +123,7 @@ function PageSection({ page, onCopy }: { page: ManualPage; onCopy: (hash: string
         </button>
       </div>
       <div className="manual-content p-6">
-        {richHtml ? (
-          <div dangerouslySetInnerHTML={{ __html: richHtmlWithHeadingIds(richHtml, page.slug) }} />
-        ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={headingComponents}>{markdown}</ReactMarkdown>
-        )}
+        <RenderedManualContent html={renderedHtml} />
       </div>
     </section>
   );
@@ -82,6 +147,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
   const effectiveActivePageIndex = activePageIndex >= 0 ? activePageIndex : 0;
   const previousPage = effectiveActivePageIndex > 0 ? pages[effectiveActivePageIndex - 1] : null;
   const nextPage = effectiveActivePageIndex < pages.length - 1 ? pages[effectiveActivePageIndex + 1] : null;
+  const showAuthenticatedDetails = app;
 
   useEffect(() => {
     function updateProgress() {
@@ -137,12 +203,45 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
     window.setTimeout(() => setCopyMessage(""), 1800);
   }
 
+  async function downloadPdf() {
+    const token = getToken();
+    const response = await fetch(`${API_URL}/manuals/${manual.id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    });
+    if (!response.ok) {
+      setCopyMessage("Could not export PDF.");
+      window.setTimeout(() => setCopyMessage(""), 1800);
+      return;
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = response.headers.get("Content-Disposition")?.match(/filename=\"?([^"]+)/)?.[1] ?? `${manual.slug}.pdf`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    setCopyMessage("PDF exported.");
+    window.setTimeout(() => setCopyMessage(""), 1800);
+  }
+
   return (
-    <div className="reader-shell grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
-      <div className="fixed inset-x-0 top-0 z-40 h-1 bg-transparent print:hidden" aria-hidden="true">
-        <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${progress}%` }} />
+    <>
+      <div className="print-cover hidden">
+        <p className="print-cover-kicker">ManualFlow Export</p>
+        <h1>{manual.title}</h1>
+        {manual.description ? <p className="print-cover-description">{manual.description}</p> : null}
+        <dl>
+          <div><dt>Version</dt><dd>v{manual.version}</dd></div>
+          {showAuthenticatedDetails ? <div><dt>Owner</dt><dd>{manual.owner?.name || "-"}</dd></div> : null}
+          {showAuthenticatedDetails ? <div><dt>Space</dt><dd>{manual.space?.name || "-"}</dd></div> : null}
+          <div><dt>Last updated</dt><dd>{formatDate(manual.updatedAt)}</dd></div>
+        </dl>
       </div>
-      <aside className="hidden lg:block">
+      <div className="reader-shell grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
+        <div className="fixed inset-x-0 top-0 z-40 h-1 bg-transparent print:hidden" aria-hidden="true">
+          <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${progress}%` }} />
+        </div>
+        <aside className="hidden lg:block">
         <div className="reader-sidebar sticky top-24 rounded-lg border border-line bg-white p-4 shadow-sm">
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Contents</p>
           <label className="mb-3 flex h-10 items-center gap-2 rounded-md border border-line bg-slate-50 px-3 text-sm text-slate-500">
@@ -168,14 +267,14 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
             {!visiblePages.length ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-500">No matching pages.</p> : null}
           </nav>
         </div>
-      </aside>
-      <article className="reader-article min-w-0 rounded-lg border border-line bg-white shadow-sm">
+        </aside>
+        <article className="reader-article min-w-0 rounded-lg border border-line bg-white shadow-sm">
         <div className="border-b border-line p-6">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <nav className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-500" aria-label="Breadcrumb">
               <Link href={app ? "/app/manuals" : "/manuals"} className="hover:text-emerald-700">Manuals</Link>
               <span>/</span>
-              {manual.space?.name ? (
+              {showAuthenticatedDetails && manual.space?.name ? (
                 <>
                   <span>{manual.space.name}</span>
                   <span>/</span>
@@ -183,7 +282,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
               ) : null}
               <span className="font-semibold text-slate-800">{manual.title}</span>
             </nav>
-            <ManualShareActions manualId={manual.id} compact />
+            {showAuthenticatedDetails ? <ManualShareActions manualId={manual.id} compact /> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge value={manual.status} />
@@ -194,12 +293,16 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
           <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{manual.title}</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{manual.description}</p>
           <div className="reader-actions mt-5 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => window.print()} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50">
-              <Printer size={16} /> Print
-            </button>
-            <button type="button" onClick={() => window.print()} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50">
-              <FileDown size={16} /> PDF
-            </button>
+            {showAuthenticatedDetails ? (
+              <>
+                <button type="button" onClick={() => window.print()} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50">
+                  <Printer size={16} /> Print
+                </button>
+                <button type="button" onClick={downloadPdf} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50">
+                  <FileDown size={16} /> PDF
+                </button>
+              </>
+            ) : null}
             <button type="button" disabled={!previousPage} onClick={() => previousPage && document.getElementById(`page-${previousPage.slug}`)?.scrollIntoView({ behavior: "smooth", block: "start" })} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">
               <ChevronLeft size={16} /> Previous
             </button>
@@ -208,57 +311,66 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
             </button>
             {copyMessage ? <span className="text-sm font-semibold text-emerald-700">{copyMessage}</span> : null}
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-line bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Owner</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{manual.owner?.name || "-"}</p>
-            </div>
+          <div className={`mt-5 grid gap-3 ${showAuthenticatedDetails ? "sm:grid-cols-3" : "sm:grid-cols-1"}`}>
+            {showAuthenticatedDetails ? (
+              <div className="rounded-lg border border-line bg-slate-50 p-3">
+                <p className="text-xs uppercase text-slate-500">Owner</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{manual.owner?.name || "-"}</p>
+              </div>
+            ) : null}
             <div className="rounded-lg border border-line bg-slate-50 p-3">
               <p className="text-xs uppercase text-slate-500">Last updated</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">{formatDate(manual.updatedAt)}</p>
             </div>
-            <div className="rounded-lg border border-line bg-slate-50 p-3">
-              <p className="text-xs uppercase text-slate-500">Space</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">{manual.space?.name || "-"}</p>
-            </div>
+            {showAuthenticatedDetails ? (
+              <div className="rounded-lg border border-line bg-slate-50 p-3">
+                <p className="text-xs uppercase text-slate-500">Space</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{manual.space?.name || "-"}</p>
+              </div>
+            ) : null}
           </div>
           {signals ? (
-            <div className="mt-3 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-lg border border-line bg-white p-3">
-                <p className="text-xs uppercase text-slate-500">Pages</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">{signals.pageCount}</p>
-              </div>
+            <div className={`mt-3 grid gap-3 ${showAuthenticatedDetails ? "sm:grid-cols-4" : "sm:grid-cols-1"}`}>
+              {showAuthenticatedDetails ? (
+                <div className="rounded-lg border border-line bg-white p-3">
+                  <p className="text-xs uppercase text-slate-500">Pages</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{signals.pageCount}</p>
+                </div>
+              ) : null}
               <div className="rounded-lg border border-line bg-white p-3">
                 <p className="text-xs uppercase text-slate-500">Reading time</p>
                 <p className="mt-1 text-sm font-semibold text-slate-900">{readingMinutes} min</p>
               </div>
-              {typeof signals.qualityScore === "number" ? (
+              {showAuthenticatedDetails && typeof signals.qualityScore === "number" ? (
                 <div className="rounded-lg border border-line bg-white p-3">
                   <p className="text-xs uppercase text-slate-500">Quality</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">{signals.qualityScore}%</p>
                 </div>
               ) : null}
-              <div className="rounded-lg border border-line bg-white p-3">
-                <p className="text-xs uppercase text-slate-500">Review</p>
-                <p className="mt-1 text-sm font-semibold capitalize text-slate-900">{humanizeStatus(signals.reviewDueStatus)}</p>
-              </div>
+              {showAuthenticatedDetails ? (
+                <div className="rounded-lg border border-line bg-white p-3">
+                  <p className="text-xs uppercase text-slate-500">Review</p>
+                  <p className="mt-1 text-sm font-semibold capitalize text-slate-900">{humanizeStatus(signals.reviewDueStatus)}</p>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
         {visiblePages.length ? visiblePages.map((page) => <PageSection key={page.id} page={page} onCopy={handleCopy} />) : pages.length ? (
           <div className="manual-content p-6">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>No pages match the current search.</ReactMarkdown>
+            <RenderedManualContent html="<p>No pages match the current search.</p>" />
           </div>
         ) : (
           <div className="manual-content p-6">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}># No content yet</ReactMarkdown>
+            <RenderedManualContent html="<h1>No content yet</h1>" />
           </div>
         )}
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line p-5 text-sm text-slate-600">
           <span>Last updated {formatDate(manual.updatedAt)}</span>
           <span>Version {manual.version}</span>
         </footer>
-      </article>
-    </div>
+        </article>
+      </div>
+    </>
   );
 }

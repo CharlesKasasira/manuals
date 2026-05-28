@@ -166,6 +166,35 @@ describe("ManualsService", () => {
     expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ event: "manual_published" }));
   });
 
+  it("exports a readable manual as a real PDF document", async () => {
+    const { service } = makeService({
+      manual: {
+        findUnique: jest.fn().mockResolvedValue({
+          ...manual,
+          owner: { name: "Manuals Admin" },
+          updatedAt: new Date("2026-05-28T00:00:00.000Z"),
+          pages: [
+            {
+              id: "page-1",
+              title: "Install",
+              slug: "install",
+              publishedContentHtml: "<p>Run the installer and verify the service.</p>"
+            }
+          ]
+        }),
+        findFirst: jest.fn().mockResolvedValue(manual),
+        update: jest.fn(),
+        findMany: jest.fn()
+      }
+    });
+
+    const pdf = await service.pdfExport(actor, manual.id);
+
+    expect(pdf.fileName).toBe("network-manual.pdf");
+    expect(pdf.buffer.subarray(0, 8).toString("utf8")).toBe("%PDF-1.4");
+    expect(pdf.buffer.toString("utf8")).toContain("/Type /Catalog");
+  });
+
   it("blocks a manager from publishing a manual without manual-level publish access", async () => {
     const otherManual = { ...manual, id: "manual-2", ownerId: "owner-2", status: ManualStatus.approved };
     const { service, prisma, audit } = makeService({

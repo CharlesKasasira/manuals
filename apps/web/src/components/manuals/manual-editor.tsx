@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   BookOpenCheck,
@@ -44,12 +45,41 @@ import { formatDate, humanizeStatus } from "@/lib/utils";
 
 type FlatPage = ManualPage & { depth: number };
 type LifecycleAction = "submit-review" | "approve" | "request-changes" | "publish" | "archive";
+type SlashCommandId = "procedure" | "warning" | "table" | "code" | "diagram" | "tabs" | "image" | "video";
+
+type SlashCommand = {
+  id: SlashCommandId;
+  label: string;
+  hint: string;
+  keywords: string[];
+};
 
 const blankPage = {
   title: "",
   contentHtml: "",
   parentId: ""
 };
+
+const slashCommands: SlashCommand[] = [
+  { id: "procedure", label: "Procedure", hint: "Purpose, steps, and verification", keywords: ["runbook", "steps", "process"] },
+  { id: "warning", label: "Warning", hint: "Risk, exception, or prerequisite callout", keywords: ["alert", "callout", "caution"] },
+  { id: "table", label: "Table", hint: "Structured comparison or requirements grid", keywords: ["grid", "matrix"] },
+  { id: "code", label: "Code", hint: "Highlighted code block", keywords: ["snippet", "playground"] },
+  { id: "diagram", label: "Mermaid diagram", hint: "Flowchart, sequence, or architecture map", keywords: ["mermaid", "flowchart", "sequence", "architecture"] },
+  { id: "tabs", label: "Code tabs", hint: "Switcher for alternate commands or languages", keywords: ["switcher", "playground", "languages"] },
+  { id: "image", label: "Image", hint: "Upload and crop an image", keywords: ["photo", "diagram", "screenshot"] },
+  { id: "video", label: "Video", hint: "Embed YouTube, Vimeo, or uploaded video", keywords: ["embed", "media"] }
+];
+
+export function slashCommandsForQuery(query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return slashCommands;
+  return slashCommands.filter((command) => (
+    command.label.toLowerCase().includes(normalized) ||
+    command.id.includes(normalized) ||
+    command.keywords.some((keyword) => keyword.includes(normalized))
+  ));
+}
 
 function flattenPages(pages: ManualPage[] = [], depth = 0): FlatPage[] {
   return pages.flatMap((page) => [{ ...page, depth }, ...flattenPages(page.children ?? [], depth + 1)]);
@@ -695,6 +725,9 @@ function RichManualEditor({
   const [imageDraft, setImageDraft] = useState<{ file: File; url: string; zoom: number; x: number; y: number; ratio: string } | null>(null);
   const [codeDraft, setCodeDraft] = useState<{ open: boolean; language: string; code: string }>({ open: false, language: "typescript", code: "" });
   const [videoDraft, setVideoDraft] = useState<{ open: boolean; url: string }>({ open: false, url: "" });
+  const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const visibleSlashCommands = slashCommandsForQuery(slashQuery ?? "");
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -723,6 +756,107 @@ function RichManualEditor({
     editorRef.current?.focus();
     document.execCommand("insertHTML", false, sanitizeRichHtml(html));
     sync();
+  }
+
+  function getSlashQuery() {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount) return null;
+    const node = selection.anchorNode;
+    if (!node || !editor.contains(node) || node.nodeType !== Node.TEXT_NODE) return null;
+    const text = node.textContent ?? "";
+    const offset = selection.anchorOffset;
+    const beforeCursor = text.slice(0, offset);
+    const match = /(?:^|\s)\/([a-z]*)$/i.exec(beforeCursor);
+    return match ? match[1] : null;
+  }
+
+  function removeSlashQuery() {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount) return;
+    const node = selection.anchorNode;
+    if (!node || !editor.contains(node) || node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.textContent ?? "";
+    const offset = selection.anchorOffset;
+    const beforeCursor = text.slice(0, offset);
+    const match = /(?:^|\s)\/([a-z]*)$/i.exec(beforeCursor);
+    if (!match || match.index === undefined) return;
+
+    const slashStart = beforeCursor.lastIndexOf("/");
+    node.textContent = `${text.slice(0, slashStart)}${text.slice(offset)}`;
+    const range = document.createRange();
+    range.setStart(node, slashStart);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function updateSlashMenu() {
+    const query = getSlashQuery();
+    setSlashQuery(query);
+    setSlashIndex(0);
+  }
+
+  function applySlashCommand(command: SlashCommand) {
+    removeSlashQuery();
+    sync();
+    setSlashQuery(null);
+
+    switch (command.id) {
+      case "procedure":
+        insertHtml(procedureBlock());
+        return;
+      case "warning":
+        insertHtml(calloutBlock("warning"));
+        return;
+      case "table":
+        insertHtml(tableBlock());
+        return;
+      case "code":
+        setCodeDraft((draft) => ({ ...draft, open: true }));
+        return;
+      case "diagram":
+        setCodeDraft({ open: true, language: "mermaid", code: "flowchart TD\n  Start[Start] --> Decision{Decision}\n  Decision -->|Yes| Done[Done]\n  Decision -->|No| Start" });
+        return;
+      case "tabs":
+        insertHtml(codeTabsBlock());
+        return;
+      case "image":
+        imageInputRef.current?.click();
+        return;
+      case "video":
+        setVideoDraft({ open: true, url: "" });
+        return;
+    }
+  }
+
+  function handleKeyUp(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) return;
+    updateSlashMenu();
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (slashQuery === null) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setSlashQuery(null);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSlashIndex((index) => Math.min(index + 1, Math.max(visibleSlashCommands.length - 1, 0)));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSlashIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === "Enter" && visibleSlashCommands[slashIndex]) {
+      event.preventDefault();
+      applySlashCommand(visibleSlashCommands[slashIndex]);
+    }
   }
 
   async function uploadMediaFile(file: File) {
@@ -801,6 +935,7 @@ function RichManualEditor({
   }
 
   function handleEditorClick(event: React.MouseEvent<HTMLDivElement>) {
+    setSlashQuery(null);
     const target = event.target;
     if (target instanceof HTMLImageElement || target instanceof HTMLVideoElement) {
       setSelectedMediaElement(target);
@@ -820,7 +955,7 @@ function RichManualEditor({
   const wordCount = htmlToText(value).split(/\s+/).filter(Boolean).length;
 
   return (
-    <div className="rounded-md border border-line bg-white shadow-sm">
+    <div className="relative rounded-md border border-line bg-white shadow-sm">
       <div className="flex flex-wrap items-center gap-1 border-b border-line bg-slate-50 p-2">
         <EditorTool label="Paragraph" onClick={() => command("formatBlock", "p")}><Pilcrow size={15} /></EditorTool>
         <EditorTool label="Heading 1" onClick={() => command("formatBlock", "h2")}><Heading1 size={15} /></EditorTool>
@@ -836,9 +971,11 @@ function RichManualEditor({
           <>
             <span className="mx-1 h-6 w-px bg-slate-200" />
             <EditorTool label="Procedure block" onClick={() => insertHtml(procedureBlock())}><Wand2 size={15} /><span>Procedure</span></EditorTool>
-            <EditorTool label="Note block" onClick={() => insertHtml(calloutBlock())}><Quote size={15} /><span>Note</span></EditorTool>
+            <EditorTool label="Warning block" onClick={() => insertHtml(calloutBlock("warning"))}><AlertTriangle size={15} /><span>Warning</span></EditorTool>
             <EditorTool label="Table" onClick={() => insertHtml(tableBlock())}><Table2 size={15} /><span>Table</span></EditorTool>
             <EditorTool label="Code block" onClick={() => setCodeDraft((draft) => ({ ...draft, open: true }))}><Code2 size={15} /><span>Code</span></EditorTool>
+            <EditorTool label="Mermaid diagram" onClick={() => setCodeDraft({ open: true, language: "mermaid", code: "flowchart TD\n  Start[Start] --> Decision{Decision}\n  Decision -->|Yes| Done[Done]\n  Decision -->|No| Start" })}><Wand2 size={15} /><span>Diagram</span></EditorTool>
+            <EditorTool label="Code tabs" onClick={() => insertHtml(codeTabsBlock())}><Code2 size={15} /><span>Tabs</span></EditorTool>
             <EditorTool label="Upload image" onClick={() => imageInputRef.current?.click()}><ImageIcon size={15} /><span>Image</span></EditorTool>
             <EditorTool label="Embed video" onClick={() => setVideoDraft({ open: true, url: "" })}><Video size={15} /><span>Video</span></EditorTool>
           </>
@@ -871,10 +1008,33 @@ function RichManualEditor({
         data-placeholder={placeholder}
         onInput={sync}
         onBlur={sync}
+        onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
         onPaste={handlePaste}
         onClick={handleEditorClick}
         className={`manual-editor-surface manual-content px-4 py-3 text-sm leading-7 outline-none focus:bg-white ${compact ? "min-h-[130px]" : "min-h-[520px]"}`}
       />
+      {slashQuery !== null && visibleSlashCommands.length ? (
+        <div className="absolute left-3 top-14 z-20 w-[min(22rem,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-line bg-white shadow-xl">
+          <div className="border-b border-line px-3 py-2 text-xs font-semibold text-slate-500">Insert block</div>
+          <div className="max-h-72 overflow-y-auto p-1">
+            {visibleSlashCommands.map((command, index) => (
+              <button
+                key={command.id}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applySlashCommand(command);
+                }}
+                className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm ${index === slashIndex ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"}`}
+              >
+                <span className="font-semibold">{command.label}</span>
+                <span className={`text-xs ${index === slashIndex ? "text-slate-200" : "text-slate-500"}`}>{command.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {imageDraft ? (
         <ImageCropDialog
           draft={imageDraft}
@@ -1080,8 +1240,20 @@ function procedureBlock() {
   ].join("");
 }
 
-function calloutBlock() {
+function calloutBlock(kind: "note" | "warning" = "note") {
+  if (kind === "warning") {
+    return '<div class="manual-callout manual-callout-warning"><strong>Warning</strong><p>Add a risk, prerequisite, exception, or decision rule.</p></div>';
+  }
   return '<div class="manual-callout"><strong>Note</strong><p>Add an exception, risk, prerequisite, or decision rule.</p></div>';
+}
+
+function codeTabsBlock() {
+  return [
+    '<div class="manual-code-tabs">',
+    "<details open><summary>Node.js</summary><pre data-language=\"bash\"><code>npm run dev</code></pre></details>",
+    "<details><summary>PHP</summary><pre data-language=\"bash\"><code>php artisan serve</code></pre></details>",
+    "</div>"
+  ].join("");
 }
 
 function tableBlock() {

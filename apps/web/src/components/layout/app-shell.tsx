@@ -8,8 +8,16 @@ import { BarChart3, BookOpen, ChevronUp, ClipboardCheck, FileArchive, FileText, 
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 import { api, clearToken } from "@/lib/api";
+import type { Role } from "@/lib/types";
 
-const nav: Array<{ href: Route; label: string; icon: typeof LayoutDashboard }> = [
+type NavItem = {
+  href: Route;
+  label: string;
+  icon: typeof LayoutDashboard;
+  roles?: Role[];
+};
+
+const nav: NavItem[] = [
   { href: "/app", label: "Dashboard", icon: LayoutDashboard },
   { href: "/app/manuals", label: "Manuals", icon: Library },
   { href: "/app/drafts", label: "Drafts", icon: FileText },
@@ -17,15 +25,19 @@ const nav: Array<{ href: Route; label: string; icon: typeof LayoutDashboard }> =
   { href: "/app/assets", label: "Assets", icon: FileArchive },
   { href: "/app/templates", label: "Templates", icon: BookOpen },
   { href: "/app/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/app/admin", label: "Admin", icon: ShieldCheck }
+  { href: "/app/admin", label: "Admin", icon: ShieldCheck, roles: ["admin"] }
 ];
 
 type CurrentUser = {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: Role;
 };
+
+export function visibleNavItemsForRole(role?: Role | null) {
+  return nav.filter((item) => !item.roles?.length || (role ? item.roles.includes(role) : false));
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -33,6 +45,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [userLoaded, setUserLoaded] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const visibleNav = visibleNavItemsForRole(user?.role);
 
   useEffect(() => {
     let active = true;
@@ -91,7 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex-1 space-y-1 p-3">
-          {nav.map((item) => {
+          {visibleNav.map((item) => {
             const active = isActive(item.href);
             return (
             <Link

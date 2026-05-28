@@ -31,4 +31,12 @@ export class PublicController {
     res.setHeader("Content-Disposition", `attachment; filename="${pack.fileName}"`);
     res.send(pack.html);
   }
+
+  @Get("share/:token/pdf")
+  async sharedPdf(@Param("token") token: string, @Res() res: Response) {
+    const pdf = await this.manuals.pdfExport(null, "__shared__", token);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${pdf.fileName}"`);
+    res.send(pdf.buffer);
+  }
 }

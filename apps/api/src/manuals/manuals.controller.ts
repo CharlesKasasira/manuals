@@ -108,6 +108,14 @@ export class ManualsController {
     res.send(pack.html);
   }
 
+  @Get(":id/pdf")
+  async pdf(@CurrentUser() user: any, @Param("id") id: string, @Res() res: Response) {
+    const pdf = await this.manuals.pdfExport(user, id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${pdf.fileName}"`);
+    res.send(pdf.buffer);
+  }
+
   @Get(":id/collaborators")
   async collaborators(@CurrentUser() user: any, @Param("id") id: string) {
     return { data: await this.manuals.collaborators(user, id) };

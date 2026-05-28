@@ -160,6 +160,8 @@ export function markdownToHtml(markdown = "") {
   let list: "ul" | "ol" | null = null;
   let inCode = false;
   let codeLines: string[] = [];
+  let codeLanguage = "";
+  let directive: { kind: "info" | "warning" | "tip" | "details"; title: string; lines: string[] } | null = null;
 
   function closeList() {
     if (list) {
@@ -168,12 +170,48 @@ export function markdownToHtml(markdown = "") {
     }
   }
 
+  function flushDirective() {
+    if (!directive) return;
+    const innerHtml = markdownToHtml(directive.lines.join("\n"));
+    if (directive.kind === "details") {
+      html.push(`<details class="manual-details"><summary>${escapeHtml(directive.title || "Details")}</summary>${innerHtml}</details>`);
+    } else {
+      const title = directive.title || directive.kind[0].toUpperCase() + directive.kind.slice(1);
+      html.push(`<div class="manual-callout manual-callout-${directive.kind}"><strong>${escapeHtml(title)}</strong>${innerHtml}</div>`);
+    }
+    directive = null;
+  }
+
   for (const line of lines) {
-    if (/^```/.test(line)) {
+    if (directive) {
+      if (/^:::\s*$/.test(line)) {
+        flushDirective();
+      } else {
+        directive.lines.push(line);
+      }
+      continue;
+    }
+
+    const directiveStart = /^:::(info|warning|tip|details)(?:\s+(.+))?\s*$/i.exec(line);
+    if (directiveStart) {
+      closeList();
+      directive = {
+        kind: directiveStart[1].toLowerCase() as "info" | "warning" | "tip" | "details",
+        title: directiveStart[2]?.trim() ?? "",
+        lines: []
+      };
+      continue;
+    }
+
+    const codeFence = /^```\s*([a-zA-Z0-9_-]+)?\s*$/.exec(line);
+    if (codeFence) {
       closeList();
       if (inCode) {
-        html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        html.push(codeBlockHtml(codeLanguage, codeLines.join("\n")));
         codeLines = [];
+        codeLanguage = "";
+      } else {
+        codeLanguage = codeFence[1] ?? "";
       }
       inCode = !inCode;
       continue;
@@ -230,8 +268,20 @@ export function markdownToHtml(markdown = "") {
   }
 
   closeList();
-  if (inCode) html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+  if (directive) flushDirective();
+  if (inCode) html.push(codeBlockHtml(codeLanguage, codeLines.join("\n")));
   return sanitizeRichHtml(html.join(""));
+}
+
+function codeBlockHtml(language: string, code: string) {
+  const normalized = language.trim().toLowerCase();
+  if (normalized === "mermaid") {
+    const escaped = escapeHtml(code);
+    return `<div class="manual-mermaid" data-chart="${escapeAttribute(code)}">${escaped}</div>`;
+  }
+  const languageAttrs = normalized ? ` data-language="${escapeAttribute(normalized)}"` : "";
+  const classAttr = normalized ? ` class="language-${escapeAttribute(normalized)}"` : "";
+  return `<pre${languageAttrs}><code${classAttr}>${highlightCode(normalized, code)}</code></pre>`;
 }
 
 function inlineMarkdown(value: string) {
@@ -250,6 +300,10 @@ function escapeHtml(value: string) {
     "\"": "&quot;",
     "'": "&#39;"
   }[char] ?? char));
+}
+
+function escapeAttribute(value: string) {
+  return escapeHtml(value).replace(/\n/g, "&#10;");
 }
 
 function sanitizeIframe(attrs: string) {

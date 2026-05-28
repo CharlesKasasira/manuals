@@ -546,6 +546,15 @@ export class ManualsService {
     return { fileName: `${this.slugify(manual.title)}-offline.html`, html: this.buildOfflineHtml(manual) };
   }
 
+  async pdfExport(actor: Actor, manualId: string, token?: string) {
+    const manual = token ? await this.getByShareToken(token) : await this.getById(actor, manualId);
+    if (!token) await this.requireManualReadable(actor, manualId);
+    return {
+      fileName: `${this.slugify(manual.title)}.pdf`,
+      buffer: this.buildManualPdf(manual)
+    };
+  }
+
   async getById(actor: Actor, id: string) {
     const manual = await this.prisma.manual.findUnique({ where: { id }, include: manualInclude });
     if (!manual || manual.deletedAt) throw new NotFoundException("Manual not found.");
@@ -827,6 +836,49 @@ export class ManualsService {
 </html>`;
   }
 
+  private buildManualPdf(manual: any) {
+    const pages = this.flattenPages(manual.tableOfContents ?? manual.pages ?? []);
+    const generatedAt = new Date();
+    const owner = manual.owner?.name ?? "Unassigned";
+    const metadata = [
+      `Version ${manual.version ?? "-"}`,
+      `Owner ${owner}`,
+      `Updated ${manual.updatedAt ? this.formatPdfDate(manual.updatedAt) : this.formatPdfDate(generatedAt)}`
+    ].join(" | ");
+    const title = manual.title || "Manual";
+    const pdf = new SimplePdfDocument({ title, footer: metadata });
+
+    pdf.addPage();
+    pdf.text("ManualFlow Export", 48, 84, 11, "muted");
+    pdf.text(title, 48, 128, 28, "bold", 500);
+    if (manual.description) pdf.multiline(this.decodeEntities(this.toPlainText(manual.description)), 48, 176, 14, 500, 22);
+    pdf.text(metadata, 48, 716, 10, "muted");
+    pdf.text(`Generated ${this.formatPdfDate(generatedAt)}`, 48, 734, 10, "muted");
+
+    const tocEntries = pages.map((page: any, index: number) => ({ title: page.title, pageNumber: index + 3 }));
+    pdf.addPage();
+    pdf.text("Table of Contents", 48, 72, 22, "bold");
+    let tocY = 116;
+    for (const entry of tocEntries) {
+      if (tocY > 730) {
+        pdf.addPage();
+        tocY = 72;
+      }
+      pdf.text(entry.title || "Untitled page", 64, tocY, 12, "normal", 390);
+      pdf.text(String(entry.pageNumber), 508, tocY, 12, "normal", 40);
+      tocY += 22;
+    }
+
+    for (const page of pages) {
+      pdf.addPage();
+      pdf.text(page.title || "Untitled page", 48, 72, 22, "bold", 500);
+      const body = this.decodeEntities(this.toPlainText(page.publishedContentHtml || page.draftContentHtml || page.publishedMarkdown || page.draftMarkdown || "No content yet."));
+      pdf.multiline(body || "No content yet.", 48, 116, 11, 500, 17);
+    }
+
+    return pdf.render();
+  }
+
   private flattenPages(pages: any[] = []): any[] {
     return pages.flatMap((page) => [page, ...this.flattenPages(page.children ?? [])]);
   }
@@ -839,5 +891,131 @@ export class ManualsService {
       "\"": "&quot;",
       "'": "&#39;"
     }[char] ?? char));
+  }
+
+  private decodeEntities(value: string) {
+    return value
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/gi, "'");
+  }
+
+  private formatPdfDate(value: string | Date) {
+    return new Date(value).toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" });
+  }
+}
+
+type PdfTextStyle = "normal" | "bold" | "muted";
+
+class SimplePdfDocument {
+  private pages: string[][] = [];
+  private currentPage: string[] = [];
+  private readonly width = 595.28;
+  private readonly height = 841.89;
+
+  constructor(private readonly options: { title: string; footer: string }) {}
+
+  addPage() {
+    if (this.currentPage.length) this.pages.push(this.currentPage);
+    this.currentPage = [];
+  }
+
+  text(value: string, x: number, y: number, size = 12, style: PdfTextStyle = "normal", maxWidth = 480) {
+    const clean = this.cleanText(value);
+    const lines = this.wrap(clean, maxWidth, size);
+    lines.forEach((line, index) => this.rawText(line, x, y + index * (size + 4), size, style));
+    return y + lines.length * (size + 4);
+  }
+
+  multiline(value: string, x: number, y: number, size = 11, maxWidth = 500, lineHeight = 17) {
+    let cursor = y;
+    const paragraphs = this.cleanText(value).split(/\n{2,}/).filter(Boolean);
+    for (const paragraph of paragraphs.length ? paragraphs : [this.cleanText(value)]) {
+      const lines = this.wrap(paragraph, maxWidth, size);
+      for (const line of lines) {
+        if (cursor > 730) {
+          this.addPage();
+          cursor = 72;
+        }
+        this.rawText(line, x, cursor, size, "normal");
+        cursor += lineHeight;
+      }
+      cursor += 8;
+    }
+  }
+
+  render() {
+    if (this.currentPage.length) this.pages.push(this.currentPage);
+    const total = this.pages.length;
+    const objects: string[] = [];
+    objects.push("<< /Type /Catalog /Pages 2 0 R >>");
+    objects.push(`<< /Type /Pages /Kids [${this.pages.map((_, index) => `${3 + index * 2} 0 R`).join(" ")}] /Count ${total} >>`);
+
+    this.pages.forEach((commands, index) => {
+      const pageObjectNumber = 3 + index * 2;
+      const contentObjectNumber = pageObjectNumber + 1;
+      const footer = this.footerCommands(index + 1, total);
+      const stream = [...commands, ...footer].join("\n");
+      objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.width} ${this.height}] /Resources << /Font << /F1 ${3 + total * 2} 0 R /F2 ${4 + total * 2} 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
+      objects.push(`<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`);
+    });
+
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+
+    const parts = ["%PDF-1.4\n"];
+    const offsets = [0];
+    objects.forEach((object, index) => {
+      offsets.push(Buffer.byteLength(parts.join(""), "utf8"));
+      parts.push(`${index + 1} 0 obj\n${object}\nendobj\n`);
+    });
+    const xrefOffset = Buffer.byteLength(parts.join(""), "utf8");
+    parts.push(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
+    offsets.slice(1).forEach((offset) => parts.push(`${String(offset).padStart(10, "0")} 00000 n \n`));
+    parts.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+    return Buffer.from(parts.join(""), "utf8");
+  }
+
+  private rawText(value: string, x: number, y: number, size: number, style: PdfTextStyle) {
+    const font = style === "bold" ? "F2" : "F1";
+    const color = style === "muted" ? "0.39 0.45 0.55" : "0.06 0.09 0.16";
+    this.currentPage.push(`BT /${font} ${size} Tf ${color} rg ${x} ${this.height - y} Td (${this.escapePdf(value)}) Tj ET`);
+  }
+
+  private footerCommands(pageNumber: number, totalPages: number) {
+    const footer = `${this.options.footer} | Page ${pageNumber} of ${totalPages}`;
+    return [
+      `0.88 0.90 0.94 RG 48 42 m 547 42 l S`,
+      `BT /F1 9 Tf 0.39 0.45 0.55 rg 48 28 Td (${this.escapePdf(this.cleanText(footer))}) Tj ET`
+    ];
+  }
+
+  private wrap(value: string, maxWidth: number, size: number) {
+    const maxChars = Math.max(12, Math.floor(maxWidth / (size * 0.52)));
+    const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length > maxChars && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    if (line) lines.push(line);
+    return lines.length ? lines : [""];
+  }
+
+  private cleanText(value: string) {
+    return String(value).replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "").trim();
+  }
+
+  private escapePdf(value: string) {
+    return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
   }
 }
