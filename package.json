@@ -12,6 +12,7 @@
     "dev:api": "npm run start:dev --workspace @manualflow/api",
     "build": "npm run build --workspaces --if-present",
     "clean:next": "node scripts/safe-reset-next-cache.mjs",
+    "doctor:dev": "node scripts/dev-process-doctor.mjs",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "db:generate": "npm run prisma:generate --workspace @manualflow/api",

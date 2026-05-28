@@ -9,6 +9,7 @@ This repository is often edited by multiple coding agents at the same time. Keep
 - Do not run `rm -rf apps/web/.next` while the dev server or a production build is running. This causes missing `routes-manifest.json`, `app-paths-manifest.json`, `page.js`, `_document.js`, and `vendor-chunks/*.js` errors.
 - To reset the generated Next cache, stop the dev server first, then run `npm run clean:next`.
 - If process inspection is unavailable and you are certain nothing is running, use `npm run clean:next -- --force`. Prefer the non-force command.
+- If pages are slow or manifests/chunks are missing, run `npm run doctor:dev` before clearing caches. Fix duplicate processes first.
 
 ## Dependency Changes
 
