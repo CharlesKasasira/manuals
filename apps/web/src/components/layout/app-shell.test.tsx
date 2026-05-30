@@ -11,9 +11,10 @@ describe("visibleNavItemsForRole", () => {
   });
 
   it("shows admin-only routes to admins", () => {
-    const labels = visibleNavItemsForRole("admin").map((item) => item.label);
+    const adminItem = visibleNavItemsForRole("admin").find((item) => item.label === "Admin");
 
-    expect(labels).toContain("Admin");
+    expect(adminItem).toBeDefined();
+    expect(adminItem?.children?.map((item) => item.label)).toEqual(["Users", "Groups", "Permissions", "API keys", "Email", "Audit", "System Info"]);
   });
 
   it("hides restricted routes until the current user is known", () => {

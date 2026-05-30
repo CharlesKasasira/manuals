@@ -104,7 +104,16 @@ export type Asset = {
   scanDetails?: Record<string, unknown> | null;
   createdAt: string;
   uploadedBy?: { id: string; name: string; email: string } | null;
-  usages?: Array<{ id: string; manualId?: string | null; pageId?: string | null; context?: string | null }>;
+  usages?: AssetUsage[];
+};
+
+export type AssetUsage = {
+  id: string;
+  manualId?: string | null;
+  pageId?: string | null;
+  context?: string | null;
+  manual?: Manual | null;
+  page?: ManualPage | null;
 };
 
 export type AuditLog = {
@@ -190,6 +199,39 @@ export type AdminOverview = {
   pendingNotifications: number;
   roleCounts: Partial<Record<Role, number>>;
   mailSettings: MailSettings;
+};
+
+export type AdminSystemInfo = {
+  application: {
+    name: string;
+    version: string;
+    environment: string;
+    apiUrl?: string | null;
+    uploadRoot: string;
+  };
+  runtime: {
+    nodeVersion: string;
+    platform: string;
+    uptimeSeconds: number;
+    pid: number;
+  };
+  database: {
+    provider: string;
+    version?: string | null;
+    databaseName?: string | null;
+    status: string;
+    error?: string;
+  };
+  host: {
+    operatingSystem: string;
+    platform: string;
+    hostname: string;
+    cpuCores: number;
+    totalRamBytes: number;
+    freeRamBytes: number;
+    workingDirectory: string;
+    configurationFile?: string | null;
+  };
 };
 
 export type MailSettings = {

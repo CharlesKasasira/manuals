@@ -1,24 +1,32 @@
 "use client";
 
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, Filter, KeyRound, Mail, Plus, Power, PowerOff, Send, ShieldCheck, Trash2, UserCheck, UserCog, UserX, Users } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
+import { BookOpen, Check, Copy, Cpu, Database, Filter, HardDrive, KeyRound, Layers3, Mail, Plus, Power, PowerOff, RotateCw, Send, Server, ShieldCheck, Trash2, UserCheck, UserCog, UserX, Users } from "lucide-react";
+import Link from "next/link";
+import type { Route } from "next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { api, setToken } from "@/lib/api";
-import type { AdminOverview, AdminUser, ApiKey, PermissionAction, Role, Team } from "@/lib/types";
+import type { AdminOverview, AdminSystemInfo, AdminUser, ApiKey, PermissionAction, Role, Team } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
-type Tab = "users" | "teams" | "permissions" | "api-keys" | "mail" | "audit";
+export type AdminSection = "overview" | "users" | "teams" | "permissions" | "api-keys" | "mail" | "audit" | "system";
+type Tab = Exclude<AdminSection, "overview">;
 type RunAction = (action: () => Promise<unknown>, success: string) => Promise<unknown>;
-const adminTabs: Tab[] = ["users", "teams", "permissions", "api-keys", "mail", "audit"];
-
-function isAdminTab(value: string | null): value is Tab {
-  return adminTabs.includes(value as Tab);
-}
+const adminTabs: Tab[] = ["users", "teams", "permissions", "api-keys", "mail", "audit", "system"];
+const tabLabels: Record<Tab, string> = {
+  users: "Users",
+  teams: "Groups",
+  permissions: "Permissions",
+  "api-keys": "API keys",
+  mail: "Email",
+  audit: "Audit",
+  system: "System Info"
+};
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md border border-dashed border-line bg-slate-50 p-5 text-sm text-slate-500">{children}</div>;
@@ -28,10 +36,23 @@ function ErrorState({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{children}</div>;
 }
 
-export function AdminManagementPanel() {
-  const searchParams = useSearchParams();
-  const requestedTab = searchParams.get("tab");
-  const [tab, setTab] = useState<Tab>(isAdminTab(requestedTab) ? requestedTab : "users");
+function formatBytes(value = 0) {
+  if (!value) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  return `${(value / 1024 ** index).toFixed(index ? 2 : 0)} ${units[index]}`;
+}
+
+function formatDuration(totalSeconds = 0) {
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h ${minutes}m`;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+export function AdminManagementPanel({ section = "overview" }: { section?: AdminSection }) {
   const [message, setMessage] = useState("");
   const overview = useQuery({
     queryKey: ["admin", "overview"],
@@ -41,10 +62,6 @@ export function AdminManagementPanel() {
 
   const data = overview.data;
   const activeUsers = data?.users.filter((user) => user.isActive).length ?? 0;
-
-  useEffect(() => {
-    if (isAdminTab(requestedTab)) setTab(requestedTab);
-  }, [requestedTab]);
 
   async function run(action: () => Promise<unknown>, success: string) {
     setMessage("");
@@ -66,8 +83,8 @@ export function AdminManagementPanel() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-950">Admin</h1>
-          <p className="mt-1 text-sm text-slate-600">Manage users, roles, teams, and permission grants.</p>
+          <h1 className="text-2xl font-semibold text-slate-950">Control center</h1>
+          <p className="mt-1 text-sm text-slate-600">Administer identity, access, content operations, integrations, and system trust signals.</p>
         </div>
         {message ? <span className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</span> : null}
       </div>
@@ -79,29 +96,45 @@ export function AdminManagementPanel() {
         <Metric label="Audit events" value={data.auditLogs.length} icon={ShieldCheck} />
       </div>
 
+      {section === "overview" ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <ControlCenterCard title="Identity" description="Create accounts, activate users, impersonate for support, and assign base roles." value={`${data.users.length} users`} icon={Users} href="/app/admin/users" />
+          <ControlCenterCard title="Access groups" description="Organize people into teams for ownership and reusable access patterns." value={`${data.teams.length} groups`} icon={UserCheck} href="/app/admin/teams" />
+          <ControlCenterCard title="Permissions" description="Grant scoped actions across manuals, spaces, and teams." value={`${data.permissions.length} grants`} icon={ShieldCheck} href="/app/admin/permissions" />
+          <ControlCenterCard title="Integrations" description="Manage automation credentials and API access for connected systems." value={`${data.apiAccess.keys.length} keys`} icon={KeyRound} href="/app/admin/api-keys" />
+          <ControlCenterCard title="Email" description="Configure outbound mail for resets, reviews, and notifications." value={data.mailSettings.configured ? "Configured" : "Not configured"} icon={Mail} href="/app/admin/mail" />
+          <ControlCenterCard title="Audit trail" description="Review administrative and content governance events." value={`${data.auditLogs.length} events`} icon={ShieldCheck} href="/app/admin/audit" />
+          <ControlCenterCard title="System Info" description="Inspect application, runtime, database, and host information." value={data.mailSettings.configured ? "Ready" : "Review"} icon={Server} href="/app/admin/system" />
+          <ControlCenterCard title="Spaces" description="Track the content spaces available for manuals and permission scopes." value={`${data.spaces.length} spaces`} icon={Layers3} />
+          <ControlCenterCard title="Content estate" description="Monitor manuals governed by this workspace." value={`${data.manuals.length} manuals`} icon={BookOpen} />
+          <ControlCenterCard title="System health" description="Check pending notifications and mail readiness before reviews go out." value={`${data.pendingNotifications} pending`} icon={Mail} href="/app/admin/mail" />
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         {adminTabs.map((item) => (
-          <button
+          <Link
             key={item}
-            onClick={() => setTab(item)}
-            className={`rounded-md border px-4 py-2 text-sm font-semibold ${tab === item ? "border-slate-950 bg-slate-950 text-white" : "border-line bg-white text-slate-700 hover:bg-slate-50"}`}
+            href={`/app/admin/${item}` as Route}
+            className={`rounded-md border px-4 py-2 text-sm font-semibold ${section === item ? "border-slate-950 bg-slate-950 text-white" : "border-line bg-white text-slate-700 hover:bg-slate-50"}`}
           >
-            {item.replace("-", " ")}
-          </button>
+            {tabLabels[item]}
+          </Link>
         ))}
       </div>
 
-      {tab === "users" ? <UsersAdmin data={data} run={run} /> : null}
-      {tab === "teams" ? <TeamsAdmin data={data} run={run} /> : null}
-      {tab === "permissions" ? <PermissionsAdmin data={data} run={run} /> : null}
-      {tab === "api-keys" ? <ApiKeysAdmin data={data} run={run} /> : null}
-      {tab === "mail" ? <MailAdmin data={data} run={run} /> : null}
-      {tab === "audit" ? <AuditAdmin data={data} /> : null}
+      {section === "users" ? <UsersAdmin data={data} run={run} /> : null}
+      {section === "teams" ? <TeamsAdmin data={data} run={run} /> : null}
+      {section === "permissions" ? <PermissionsAdmin data={data} run={run} /> : null}
+      {section === "api-keys" ? <ApiKeysAdmin data={data} run={run} /> : null}
+      {section === "mail" ? <MailAdmin data={data} run={run} /> : null}
+      {section === "audit" ? <AuditAdmin data={data} /> : null}
+      {section === "system" ? <SystemInfoAdmin /> : null}
     </div>
   );
 }
 
-function Metric({ label, value, icon: Icon }: { label: string; value: string | number; icon: typeof Users }) {
+function Metric({ label, value, icon: Icon }: { label: string; value: string | number; icon: LucideIcon }) {
   return (
     <Card>
       <CardContent className="flex items-center justify-between">
@@ -112,6 +145,161 @@ function Metric({ label, value, icon: Icon }: { label: string; value: string | n
         <span className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sky-700"><Icon size={20} /></span>
       </CardContent>
     </Card>
+  );
+}
+
+function ControlCenterCard({
+  title,
+  description,
+  value,
+  icon: Icon,
+  active = false,
+  href
+}: {
+  title: string;
+  description: string;
+  value: string;
+  icon: LucideIcon;
+  active?: boolean;
+  href?: Route;
+}) {
+  const content = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <span className={`rounded-md border p-2 ${active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-line bg-slate-50 text-slate-600"}`}>
+          <Icon size={18} />
+        </span>
+        <span className="rounded-full border border-line bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{value}</span>
+      </div>
+      <div>
+        <h2 className="text-sm font-semibold text-slate-950">{title}</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+      </div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className={`grid min-h-40 gap-4 rounded-lg border bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50 ${active ? "border-slate-950 ring-1 ring-slate-950" : "border-line"}`}
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className="grid min-h-40 gap-4 rounded-lg border border-line bg-white p-4 shadow-sm">{content}</div>;
+}
+
+function SystemInfoAdmin() {
+  const system = useQuery({
+    queryKey: ["admin", "system"],
+    queryFn: async () => (await api<{ data: AdminSystemInfo }>("/admin/system")).data,
+    retry: false
+  });
+
+  if (system.isLoading) return <EmptyState>Loading system information...</EmptyState>;
+  if (system.isError || !system.data) return <ErrorState>System information requires an admin account and a running API.</ErrorState>;
+
+  const data = system.data;
+  const ramUsed = Math.max(0, data.host.totalRamBytes - data.host.freeRamBytes);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">System</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">System Info</h2>
+          <p className="mt-1 text-sm text-slate-600">Information about your Manuals installation and host runtime.</p>
+        </div>
+        <Button type="button" variant="secondary" onClick={() => system.refetch()} disabled={system.isFetching}>
+          <RotateCw className={system.isFetching ? "animate-spin" : ""} size={16} /> Refresh
+        </Button>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.75fr)]">
+        <div className="space-y-5">
+          <SystemCard title="Manuals">
+            <SystemRow icon={BookOpen} label="Application" value={data.application.name} detail={`Version ${data.application.version}`} tone="blue" />
+            <SystemRow icon={Server} label="Environment" value={data.application.environment} detail={data.application.apiUrl ?? "API URL not configured"} tone="blue" />
+            <SystemRow icon={HardDrive} label="Upload Root" value={data.application.uploadRoot} tone="blue" />
+          </SystemCard>
+
+          <SystemCard title="Host Information">
+            <SystemRow icon={Server} label="Operating System" value={data.host.operatingSystem} detail={data.host.platform} tone="slate" />
+            <SystemRow icon={Server} label="Hostname" value={data.host.hostname} tone="slate" />
+            <SystemRow icon={Cpu} label="CPU Cores" value={String(data.host.cpuCores)} tone="slate" />
+            <SystemRow icon={Cpu} label="Total RAM" value={formatBytes(data.host.totalRamBytes)} detail={`${formatBytes(ramUsed)} used`} tone="slate" />
+            <SystemRow icon={HardDrive} label="Working Directory" value={data.host.workingDirectory} tone="slate" />
+            <SystemRow icon={HardDrive} label="Configuration File" value={data.host.configurationFile ?? "Environment variables"} tone="slate" />
+          </SystemCard>
+        </div>
+
+        <div className="space-y-5">
+          <SystemCard title="Node.js">
+            <SystemRow icon={Server} label="Runtime Version" value={data.runtime.nodeVersion} detail={`${data.runtime.platform} / PID ${data.runtime.pid}`} tone="green" />
+            <SystemRow icon={RotateCw} label="Uptime" value={formatDuration(data.runtime.uptimeSeconds)} tone="green" />
+          </SystemCard>
+
+          <SystemCard title={data.database.provider.toUpperCase()}>
+            <SystemRow
+              icon={Database}
+              label={data.database.status === "connected" ? "Connected" : "Unavailable"}
+              value={data.database.version ?? "Version unavailable"}
+              detail={data.database.databaseName ?? data.database.error ?? undefined}
+              tone={data.database.status === "connected" ? "indigo" : "rose"}
+            />
+          </SystemCard>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SystemCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border border-line bg-white shadow-sm">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+      </div>
+      <div className="space-y-6 p-5">{children}</div>
+    </section>
+  );
+}
+
+function SystemRow({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  tone
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  detail?: string;
+  tone: "blue" | "green" | "indigo" | "slate" | "rose";
+}) {
+  const colors = {
+    blue: "bg-sky-500 text-white",
+    green: "bg-emerald-500 text-white",
+    indigo: "bg-indigo-600 text-white",
+    slate: "bg-slate-500 text-white",
+    rose: "bg-rose-600 text-white"
+  };
+
+  return (
+    <div className="flex gap-4">
+      <span className={`flex size-11 shrink-0 items-center justify-center rounded-full ${colors[tone]}`}>
+        <Icon size={20} />
+      </span>
+      <div className="min-w-0 pt-0.5">
+        <p className="text-sm font-semibold text-slate-950">{label}</p>
+        <p className="break-words text-sm font-semibold text-slate-700">{value}</p>
+        {detail ? <p className="break-words text-sm text-slate-500">{detail}</p> : null}
+      </div>
+    </div>
   );
 }
 

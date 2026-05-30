@@ -15,6 +15,7 @@ type NavItem = {
   label: string;
   icon: typeof LayoutDashboard;
   roles?: Role[];
+  children?: Array<{ href: Route; label: string }>;
 };
 
 const nav: NavItem[] = [
@@ -25,7 +26,21 @@ const nav: NavItem[] = [
   { href: "/app/assets", label: "Assets", icon: FileArchive },
   { href: "/app/templates", label: "Templates", icon: BookOpen },
   { href: "/app/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/app/admin", label: "Admin", icon: ShieldCheck, roles: ["admin"] }
+  {
+    href: "/app/admin",
+    label: "Admin",
+    icon: ShieldCheck,
+    roles: ["admin"],
+    children: [
+      { href: "/app/admin/users", label: "Users" },
+      { href: "/app/admin/teams", label: "Groups" },
+      { href: "/app/admin/permissions", label: "Permissions" },
+      { href: "/app/admin/api-keys", label: "API keys" },
+      { href: "/app/admin/mail", label: "Email" },
+      { href: "/app/admin/audit", label: "Audit" },
+      { href: "/app/admin/system", label: "System Info" }
+    ]
+  }
 ];
 
 type CurrentUser = {
@@ -107,26 +122,47 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {visibleNav.map((item) => {
             const active = isActive(item.href);
             return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
-                active
-                  ? "bg-slate-950 text-white shadow-sm"
-                  : "text-slate-700 hover:bg-slate-100 hover:text-slate-950"
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full transition",
-                  active ? "bg-emerald-400" : "bg-transparent group-hover:bg-slate-300"
-                )}
-              />
-              <item.icon size={17} className={cn("shrink-0 transition", active ? "text-emerald-200" : "text-slate-500 group-hover:text-slate-900")} />
-              <span>{item.label}</span>
-            </Link>
+              <div key={item.href}>
+                <Link
+                  href={item.href}
+                  aria-current={active && pathname === item.href ? "page" : undefined}
+                  className={cn(
+                    "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
+                    active
+                      ? "bg-slate-950 text-white shadow-sm"
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-950"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full transition",
+                      active ? "bg-emerald-400" : "bg-transparent group-hover:bg-slate-300"
+                    )}
+                  />
+                  <item.icon size={17} className={cn("shrink-0 transition", active ? "text-emerald-200" : "text-slate-500 group-hover:text-slate-900")} />
+                  <span>{item.label}</span>
+                </Link>
+                {item.children?.length && active ? (
+                  <div className="mt-1 space-y-1 pl-9">
+                    {item.children.map((child) => {
+                      const childActive = pathname === child.href;
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          aria-current={childActive ? "page" : undefined}
+                          className={cn(
+                            "block rounded-md px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2",
+                            childActive ? "bg-emerald-50 text-emerald-800" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                          )}
+                        >
+                          {child.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </nav>

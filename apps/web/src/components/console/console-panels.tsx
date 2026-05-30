@@ -18,6 +18,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  Link2,
   Loader2,
   ShieldCheck,
   Upload,
@@ -29,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { API_URL, api, getToken } from "@/lib/api";
 import { AdminManagementPanel } from "./admin-management-panel";
-import type { Asset, AuditLog, Manual, ManualAnalytics, ReviewRequest } from "@/lib/types";
+import type { Asset, AssetUsage, AuditLog, Manual, ManualAnalytics, ReviewRequest } from "@/lib/types";
 import { cn, formatDate } from "@/lib/utils";
 
 function EmptyState({ children }: { children: React.ReactNode }) {
@@ -199,6 +200,9 @@ export function AssetsPanel() {
   const [preview, setPreview] = useState<{ asset: Asset; url: string; mimeType: string } | null>(null);
   const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState("");
+  const [usageDialog, setUsageDialog] = useState<{ asset: Asset; usages: AssetUsage[] } | null>(null);
+  const [usageLoadingId, setUsageLoadingId] = useState<string | null>(null);
+  const [usageError, setUsageError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const assets = useQuery({ queryKey: ["assets"], queryFn: async () => (await api<{ data: Asset[] }>("/assets")).data, retry: false });
   const data = assets.data ?? [];
@@ -302,6 +306,20 @@ export function AssetsPanel() {
     }
   }
 
+  async function viewUsages(asset: Asset) {
+    setUsageDialog(null);
+    setUsageError("");
+    setUsageLoadingId(asset.id);
+    try {
+      const response = await api<{ data: AssetUsage[] }>(`/assets/${asset.id}/usages`);
+      setUsageDialog({ asset, usages: response.data });
+    } catch (error) {
+      setUsageError(error instanceof Error ? error.message : "Could not load asset usage.");
+    } finally {
+      setUsageLoadingId(null);
+    }
+  }
+
   if (assets.isLoading) return <EmptyState>Loading assets...</EmptyState>;
   if (assets.isError) return <ErrorState>Sign in or start the API to load assets.</ErrorState>;
 
@@ -392,11 +410,19 @@ export function AssetsPanel() {
         <CardContent className="p-0">
           <div className="divide-y divide-line">
             {data.length ? data.map((asset) => (
-              <div key={asset.id} className="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_120px_120px_130px_120px_auto] lg:items-center">
+              <div key={asset.id} className="grid gap-3 p-5 lg:grid-cols-[minmax(0,1fr)_110px_120px_120px_130px_120px_auto] lg:items-center">
                 <div>
                   <p className="font-semibold text-slate-950">{asset.fileName}</p>
                   <p className="mt-1 text-sm text-slate-500">{asset.mimeType || asset.kind} / {asset.uploadedBy?.name ?? "Unknown uploader"}</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => viewUsages(asset)}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  {usageLoadingId === asset.id ? <Loader2 className="animate-spin" size={15} /> : <Link2 size={15} />}
+                  {asset.usages?.length ?? 0}
+                </button>
                 <Badge value={asset.visibility} />
                 <Badge value={asset.scanStatus ?? "pending"} />
                 <span className="text-sm text-slate-600">{formatBytes(asset.sizeBytes ?? 0)}</span>
@@ -414,7 +440,52 @@ export function AssetsPanel() {
         </CardContent>
       </Card>
       {previewError ? <ErrorState>{previewError}</ErrorState> : null}
+      {usageError ? <ErrorState>{usageError}</ErrorState> : null}
+      {usageDialog ? <AssetUsageDialog asset={usageDialog.asset} usages={usageDialog.usages} onClose={() => setUsageDialog(null)} /> : null}
       {preview ? <AssetPreviewDialog preview={preview} onClose={closePreview} onDownload={() => download(preview.asset)} /> : null}
+    </div>
+  );
+}
+
+function AssetUsageDialog({ asset, usages, onClose }: { asset: Asset; usages: AssetUsage[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4" role="dialog" aria-modal="true" aria-label={`Where ${asset.fileName} is used`}>
+      <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-line p-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-slate-950">Used in</h2>
+            <p className="mt-1 truncate text-sm text-slate-500">{asset.fileName}</p>
+          </div>
+          <Button type="button" variant="ghost" onClick={onClose} aria-label="Close usage dialog"><X size={18} /></Button>
+        </div>
+        <div className="overflow-y-auto p-4">
+          {usages.length ? (
+            <div className="space-y-3">
+              {usages.map((usage) => {
+                const manualHref = usage.manual?.slug ? `/app/manuals/${usage.manual.slug}/reader${usage.page?.slug ? `#page-${usage.page.slug}` : ""}` : null;
+                return (
+                  <div key={usage.id} className="rounded-lg border border-line bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-950">{usage.manual?.title ?? "Unlinked manual"}</p>
+                        <p className="mt-1 text-sm text-slate-500">{usage.page?.title ? `Page: ${usage.page.title}` : "Manual-level reference"}</p>
+                        {usage.context ? <p className="mt-2 line-clamp-2 text-xs text-slate-500">{usage.context}</p> : null}
+                      </div>
+                      {manualHref ? (
+                        <Link href={manualHref as Route} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100">
+                          Open <ArrowUpRight size={15} />
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState>This asset is not linked to any manual pages yet.</EmptyState>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

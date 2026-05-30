@@ -4,6 +4,9 @@ import { JwtService } from "@nestjs/jwt";
 import { PermissionAction, Role } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
+import { existsSync, readFileSync } from "fs";
+import { cpus, freemem, hostname, platform, release, totalmem, type } from "os";
+import { join } from "path";
 import { AuditService } from "../common/audit.service";
 import { MailService } from "../mail/mail.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -44,6 +47,40 @@ export class AdminService {
         counts[user.role] = (counts[user.role] ?? 0) + 1;
         return counts;
       }, {})
+    };
+  }
+
+  async systemInfo() {
+    const database = await this.databaseInfo();
+    const pkg = this.packageInfo();
+    const memoryTotal = totalmem();
+    const memoryFree = freemem();
+
+    return {
+      application: {
+        name: pkg.name,
+        version: pkg.version,
+        environment: this.config.get("NODE_ENV", "development"),
+        apiUrl: this.config.get("API_URL") ?? null,
+        uploadRoot: this.config.get("UPLOAD_ROOT", "./uploads")
+      },
+      runtime: {
+        nodeVersion: process.version.replace(/^v/, ""),
+        platform: process.platform,
+        uptimeSeconds: Math.round(process.uptime()),
+        pid: process.pid
+      },
+      database,
+      host: {
+        operatingSystem: `${type()} ${release()}`,
+        platform: platform(),
+        hostname: hostname(),
+        cpuCores: cpus().length,
+        totalRamBytes: memoryTotal,
+        freeRamBytes: memoryFree,
+        workingDirectory: process.cwd(),
+        configurationFile: this.config.get("CONFIG_FILE") ?? null
+      }
     };
   }
 
@@ -320,6 +357,42 @@ export class AdminService {
 
   mailSettings() {
     return this.mail.getSettings();
+  }
+
+  async databaseInfo() {
+    try {
+      const rows = await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>("SELECT VERSION() as version, DATABASE() as databaseName");
+      const row = rows[0] ?? {};
+      return {
+        provider: "mysql",
+        version: String(row.version ?? "Unknown"),
+        databaseName: typeof row.databaseName === "string" ? row.databaseName : null,
+        status: "connected"
+      };
+    } catch (error) {
+      return {
+        provider: "database",
+        version: null,
+        databaseName: null,
+        status: "unavailable",
+        error: error instanceof Error ? error.message : "Database version could not be read."
+      };
+    }
+  }
+
+  packageInfo() {
+    const packagePath = join(process.cwd(), "package.json");
+    if (!existsSync(packagePath)) return { name: "ManualFlow", version: "0.1.0" };
+
+    try {
+      const parsed = JSON.parse(readFileSync(packagePath, "utf8")) as { name?: string; version?: string };
+      return {
+        name: parsed.name ?? "ManualFlow",
+        version: parsed.version ?? "0.1.0"
+      };
+    } catch {
+      return { name: "ManualFlow", version: "0.1.0" };
+    }
   }
 
   async updateMailSettings(actorId: string, dto: MailSettingsDto) {

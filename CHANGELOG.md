@@ -6,6 +6,10 @@
 - Stabilized manual video embeds by loading trusted YouTube/Vimeo iframes eagerly with explicit media permissions.
 - Removed the duplicate manual title and description from public reader cards.
 - Cleared default login credentials, improved login placeholders, and simplified authentication error messages.
+- Added asset library “Used in” visibility with linked manual/page usage details.
+- Reframed Admin as a control center with grouped identity, access, integration, email, audit, space, content, and health cards.
+- Split Admin management into separate submenu pages for users, groups, permissions, API keys, email, and audit.
+- Added a Wiki.js-inspired Admin System Info page with application, runtime, database, and host details.
 - Added an editor governance workflow visualizer and inline comment pinning for selected manual text.
 - Improved the manual authoring experience with clearer slash commands, an in-context visual editor surface, and drag-and-drop page reordering/nesting.
 - Added hoverable Copy Code controls and clearer language badges for reader code blocks.

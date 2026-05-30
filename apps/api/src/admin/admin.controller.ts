@@ -15,6 +15,11 @@ export class AdminController {
     return this.wrap(this.admin.overview());
   }
 
+  @Get("system")
+  systemInfo() {
+    return this.wrap(this.admin.systemInfo());
+  }
+
   @Get("roles")
   roles() {
     return { data: { roles: Object.values(Role), permissionActions: ["read", "contribute", "review", "publish", "administer"] } };
