@@ -10,14 +10,32 @@ import { API_URL, api, setToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "./theme-toggle";
 
+function readableAuthError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : "";
+  if (!message) return fallback;
+
+  try {
+    const parsed = JSON.parse(message) as { message?: unknown; error?: unknown; statusCode?: unknown };
+    if (parsed.statusCode === 401) return "Invalid email or password.";
+    if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message;
+    if (Array.isArray(parsed.message) && parsed.message.length) return parsed.message.join(" ");
+    if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error;
+  } catch {
+    // Fall back to a concise string below when the API did not return JSON.
+  }
+
+  if (/unauthorized|invalid credentials/i.test(message)) return "Invalid email or password.";
+  return message.length > 140 ? fallback : message;
+}
+
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const resetToken = searchParams.get("resetToken") ?? "";
   const ssoToken = searchParams.get("ssoToken") ?? "";
   const nextPath = searchParams.get("next") ?? "/app";
-  const [email, setEmail] = useState("admin@manualflow.local");
-  const [password, setPassword] = useState("Manuals123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showResetRequest, setShowResetRequest] = useState(false);
@@ -57,7 +75,7 @@ export function LoginForm() {
       setToken(response.data.token);
       router.push((nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/app") as Route);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(readableAuthError(err, "Sign in failed. Check your email and password, then try again."));
     } finally {
       setLoading(false);
     }
@@ -74,7 +92,7 @@ export function LoginForm() {
       });
       setError("If that account exists, a reset email has been sent.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Reset email could not be sent.");
+      setError(readableAuthError(err, "Reset email could not be sent."));
     } finally {
       setLoading(false);
     }
@@ -93,7 +111,7 @@ export function LoginForm() {
       setNewPassword("");
       router.replace("/login");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Password reset failed.");
+      setError(readableAuthError(err, "Password reset failed."));
     } finally {
       setLoading(false);
     }
@@ -141,13 +159,13 @@ export function LoginForm() {
           {resetToken ? (
             <label className="block">
               <span className="text-sm font-medium text-slate-700">New password</span>
-              <input required type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" />
+              <input required type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" placeholder="Enter your new password" />
             </label>
           ) : (
             <>
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">Email</span>
-                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" />
+                <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" placeholder="you@example.com" autoComplete="email" />
               </label>
               {!showResetRequest ? (
                 <label className="block">
@@ -158,6 +176,8 @@ export function LoginForm() {
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       className="h-11 w-full rounded-md border border-line px-3 pr-11 text-sm outline-none focus:border-slate-400"
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
                     />
                     <button
                       type="button"
