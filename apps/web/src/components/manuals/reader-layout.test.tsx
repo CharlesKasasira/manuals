@@ -71,6 +71,8 @@ describe("ReaderLayout", () => {
     expect(html).not.toContain("PDF");
     expect(html).not.toContain("Private link");
     expect(html).not.toContain("Send email");
+    expect(html).not.toContain('tracking-tight text-slate-950">Manual one</h1>');
+    expect(html).not.toContain('leading-6 text-slate-600">Manual one Description.</p>');
     expect(html).toContain("Reading time");
     expect(html).toContain("Last updated");
   });

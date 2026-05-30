@@ -9,7 +9,7 @@ describe("manual content video embeds", () => {
   it("keeps sanitized YouTube iframe embeds", () => {
     const html = sanitizeRichHtml('<iframe src="https://www.youtube.com/embed/rHNnIn0-7bE" onload="alert(1)"></iframe>');
 
-    expect(html).toBe('<iframe src="https://www.youtube.com/embed/rHNnIn0-7bE" loading="lazy" allowfullscreen></iframe>');
+    expect(html).toBe('<iframe src="https://www.youtube.com/embed/rHNnIn0-7bE" title="Embedded video" loading="eager" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>');
   });
 });
 

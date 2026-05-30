@@ -310,5 +310,5 @@ function sanitizeIframe(attrs: string) {
   const src = /(?:^|\s)src\s*=\s*(["'])(.*?)\1/i.exec(attrs)?.[2] ?? "";
   const safeSrc = videoEmbedUrl(src);
   if (!safeSrc || /\.(mp4|webm|ogg)$/i.test(safeSrc)) return "";
-  return `<iframe src="${safeSrc}" loading="lazy" allowfullscreen></iframe>`;
+  return `<iframe src="${safeSrc}" title="Embedded video" loading="eager" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>`;
 }

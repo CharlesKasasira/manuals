@@ -326,8 +326,12 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
             <span className="rounded-full border border-line bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">v{manual.version}</span>
             <span className="rounded-full border border-line bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">{readingMinutes} min read</span>
           </div>
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{manual.title}</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{manual.description}</p>
+          {showAuthenticatedDetails ? (
+            <>
+              <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">{manual.title}</h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{manual.description}</p>
+            </>
+          ) : null}
           <div className="reader-actions mt-5 flex flex-wrap items-center gap-2">
             {showAuthenticatedDetails ? (
               <>
@@ -347,7 +351,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
             </button>
             {copyMessage ? <span className="text-sm font-semibold text-emerald-700">{copyMessage}</span> : null}
           </div>
-          <div className={`mt-5 grid gap-3 ${showAuthenticatedDetails ? "sm:grid-cols-3" : "sm:grid-cols-1"}`}>
+          <div className={`mt-5 grid gap-3 ${showAuthenticatedDetails ? "sm:grid-cols-4" : "sm:grid-cols-2"}`}>
             {showAuthenticatedDetails ? (
               <div className="rounded-lg border border-line bg-slate-50 p-3">
                 <p className="text-xs uppercase text-slate-500">Owner</p>
@@ -358,6 +362,10 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
               <p className="text-xs uppercase text-slate-500">Last updated</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">{formatDate(manual.updatedAt)}</p>
             </div>
+            <div className="rounded-lg border border-line bg-slate-50 p-3">
+              <p className="text-xs uppercase text-slate-500">Reading time</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{readingMinutes} min</p>
+            </div>
             {showAuthenticatedDetails ? (
               <div className="rounded-lg border border-line bg-slate-50 p-3">
                 <p className="text-xs uppercase text-slate-500">Space</p>
@@ -366,17 +374,13 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
             ) : null}
           </div>
           {signals ? (
-            <div className={`mt-3 grid gap-3 ${showAuthenticatedDetails ? "sm:grid-cols-4" : "sm:grid-cols-1"}`}>
+            <div className={`mt-3 grid gap-3 ${showAuthenticatedDetails ? "sm:grid-cols-3" : "sm:grid-cols-1"}`}>
               {showAuthenticatedDetails ? (
                 <div className="rounded-lg border border-line bg-white p-3">
                   <p className="text-xs uppercase text-slate-500">Pages</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">{signals.pageCount}</p>
                 </div>
               ) : null}
-              <div className="rounded-lg border border-line bg-white p-3">
-                <p className="text-xs uppercase text-slate-500">Reading time</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">{readingMinutes} min</p>
-              </div>
               {showAuthenticatedDetails && typeof signals.qualityScore === "number" ? (
                 <div className="rounded-lg border border-line bg-white p-3">
                   <p className="text-xs uppercase text-slate-500">Quality</p>
