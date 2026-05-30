@@ -28,6 +28,9 @@ export type PageComment = {
   assignedTo?: Collaborator | null;
   resolvedBy?: Collaborator | null;
   mentions?: Array<{ user: Collaborator }>;
+  page?: Pick<ManualPage, "id" | "title" | "slug"> & {
+    manual?: Pick<Manual, "id" | "title" | "slug" | "status" | "visibility"> | null;
+  };
 };
 
 export type ManualPage = {
@@ -232,6 +235,13 @@ export type AdminSystemInfo = {
     workingDirectory: string;
     configurationFile?: string | null;
   };
+};
+
+export type AnalyticsSettings = {
+  googleAnalyticsEnabled: boolean;
+  googleAnalyticsMeasurementId: string;
+  googleTagManagerEnabled: boolean;
+  googleTagManagerContainerId: string;
 };
 
 export type MailSettings = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { governanceStepsForStatus, reorderPagesForDrop, slashCommandsForQuery } from "./manual-editor";
+import { clipboardImageFiles, governanceStepsForStatus, reorderPagesForDrop, slashCommandsForQuery } from "./manual-editor";
 import type { ManualPage } from "@/lib/types";
 
 describe("slashCommandsForQuery", () => {
@@ -13,6 +13,22 @@ describe("slashCommandsForQuery", () => {
     expect(slashCommandsForQuery("warn").map((command) => command.id)).toEqual(["warning"]);
     expect(slashCommandsForQuery("flowchart").map((command) => command.id)).toEqual(["diagram"]);
     expect(slashCommandsForQuery("playground").map((command) => command.id)).toEqual(["code", "tabs"]);
+  });
+});
+
+describe("clipboardImageFiles", () => {
+  it("returns pasted images once across files and items", () => {
+    const image = new File(["image"], "screenshot.png", { type: "image/png", lastModified: 1 });
+    const text = new File(["text"], "notes.txt", { type: "text/plain", lastModified: 1 });
+    const clipboardData = {
+      files: [image, text],
+      items: [
+        { kind: "file", getAsFile: () => image },
+        { kind: "string", getAsFile: () => null }
+      ]
+    } as unknown as DataTransfer;
+
+    expect(clipboardImageFiles(clipboardData)).toEqual([image]);
   });
 });
 

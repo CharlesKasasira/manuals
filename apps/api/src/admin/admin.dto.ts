@@ -1,5 +1,5 @@
 import { PermissionAction, Role } from "@prisma/client";
-import { IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, Matches, Max, Min, MinLength } from "class-validator";
+import { Allow, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, Matches, Max, Min, MinLength } from "class-validator";
 
 export class CreateUserDto {
   @IsEmail()
@@ -165,4 +165,25 @@ export class MailSettingsDto {
 export class SendTestEmailDto {
   @IsEmail()
   recipientEmail!: string;
+}
+
+export class AuthStrategiesDto {
+  @Allow()
+  strategies!: unknown;
+}
+
+export class AnalyticsSettingsDto {
+  @IsBoolean()
+  googleAnalyticsEnabled!: boolean;
+
+  @IsOptional()
+  @IsString()
+  googleAnalyticsMeasurementId?: string;
+
+  @IsBoolean()
+  googleTagManagerEnabled!: boolean;
+
+  @IsOptional()
+  @IsString()
+  googleTagManagerContainerId?: string;
 }

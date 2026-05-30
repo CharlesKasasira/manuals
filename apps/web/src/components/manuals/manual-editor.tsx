@@ -178,6 +178,26 @@ export function reorderPagesForDrop(pages: ManualPage[], draggedId: string, targ
   ));
 }
 
+export function clipboardImageFiles(clipboardData: DataTransfer) {
+  const images: File[] = [];
+  const seen = new Set<string>();
+
+  function add(file: File | null) {
+    if (!file?.type.startsWith("image/")) return;
+    const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    images.push(file);
+  }
+
+  Array.from(clipboardData.files).forEach(add);
+  Array.from(clipboardData.items)
+    .filter((item) => item.kind === "file")
+    .forEach((item) => add(item.getAsFile()));
+
+  return images;
+}
+
 function editableMarkdown(page?: ManualPage | null) {
   return page?.draftMarkdown ?? page?.publishedMarkdown ?? "";
 }
@@ -864,6 +884,7 @@ function RichManualEditor({
   const [imageDraft, setImageDraft] = useState<{ file: File; url: string; zoom: number; x: number; y: number; ratio: string } | null>(null);
   const [codeDraft, setCodeDraft] = useState<{ open: boolean; language: string; code: string }>({ open: false, language: "typescript", code: "" });
   const [videoDraft, setVideoDraft] = useState<{ open: boolean; url: string }>({ open: false, url: "" });
+  const [mediaError, setMediaError] = useState("");
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [selectionAction, setSelectionAction] = useState<{ top: number; left: number; quote: string } | null>(null);
@@ -1054,6 +1075,7 @@ function RichManualEditor({
   }
 
   async function uploadMediaFile(file: File) {
+    setMediaError("");
     const formData = new FormData();
     formData.append("file", file);
     const uploaded = await api<{ data: { id: string; fileName: string; mimeType?: string | null } }>(`/assets?visibility=${mediaVisibility}`, {
@@ -1064,6 +1086,11 @@ function RichManualEditor({
       ...uploaded.data,
       url: `${API_URL}/assets/${uploaded.data.id}/download`
     };
+  }
+
+  async function insertUploadedImage(file: File) {
+    const asset = await uploadMediaFile(file);
+    insertHtml(`<img src="${asset.url}" alt="${escapeEditorText(asset.fileName)}" width="100%" loading="lazy">`);
   }
 
   function handleImageSelection(file?: File | null) {
@@ -1090,10 +1117,11 @@ function RichManualEditor({
     setUploadingMedia(true);
     try {
       const cropped = await cropImageFile(imageDraft);
-      const asset = await uploadMediaFile(cropped);
-      insertHtml(`<img src="${asset.url}" alt="${escapeEditorText(asset.fileName)}" width="100%" loading="lazy">`);
+      await insertUploadedImage(cropped);
       URL.revokeObjectURL(imageDraft.url);
       setImageDraft(null);
+    } catch {
+      setMediaError("Image upload failed. Try a smaller image or check the API connection.");
     } finally {
       setUploadingMedia(false);
     }
@@ -1117,15 +1145,58 @@ function RichManualEditor({
     setVideoDraft({ open: false, url: "" });
   }
 
-  function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
+  async function uploadDataUrlImages(html: string) {
+    if (!/<img\b[^>]+\bsrc\s*=\s*["']data:image\//i.test(html)) return html;
+    const documentFragment = new DOMParser().parseFromString(html, "text/html");
+    const images = Array.from(documentFragment.body.querySelectorAll<HTMLImageElement>('img[src^="data:image/"]'));
+
+    for (const image of images) {
+      const dataUrl = image.getAttribute("src");
+      if (!dataUrl) continue;
+      const file = await fileFromDataUrl(dataUrl, image.getAttribute("alt") || "pasted-image");
+      const asset = await uploadMediaFile(file);
+      image.setAttribute("src", asset.url);
+      image.setAttribute("alt", image.getAttribute("alt") || asset.fileName);
+      image.setAttribute("width", image.getAttribute("width") || "100%");
+      image.setAttribute("loading", "lazy");
+    }
+
+    return documentFragment.body.innerHTML;
+  }
+
+  async function handlePaste(event: React.ClipboardEvent<HTMLDivElement>) {
     event.preventDefault();
-    const html = event.clipboardData.getData("text/html");
-    const text = event.clipboardData.getData("text/plain");
-    if (html) {
-      insertHtml(html);
+    setMediaError("");
+
+    const images = clipboardImageFiles(event.clipboardData);
+    if (images.length) {
+      setUploadingMedia(true);
+      try {
+        for (const image of images) {
+          await insertUploadedImage(image);
+        }
+      } catch {
+        setMediaError("Pasted image upload failed. Try a smaller image or check the API connection.");
+      } finally {
+        setUploadingMedia(false);
+      }
       return;
     }
-    insertHtml(text.split(/\n{2,}/).map((part) => `<p>${escapeEditorText(part).replace(/\n/g, "<br>")}</p>`).join(""));
+
+    try {
+      const html = event.clipboardData.getData("text/html");
+      const text = event.clipboardData.getData("text/plain");
+      if (html) {
+        setUploadingMedia(/<img\b[^>]+\bsrc\s*=\s*["']data:image\//i.test(html));
+        insertHtml(await uploadDataUrlImages(html));
+        return;
+      }
+      insertHtml(text.split(/\n{2,}/).map((part) => `<p>${escapeEditorText(part).replace(/\n/g, "<br>")}</p>`).join(""));
+    } catch {
+      setMediaError("Pasted content could not be inserted.");
+    } finally {
+      setUploadingMedia(false);
+    }
   }
 
   function handleEditorClick(event: React.MouseEvent<HTMLDivElement>) {
@@ -1177,6 +1248,7 @@ function RichManualEditor({
         ) : null}
         {!compact ? <span className="ml-auto px-2 text-xs font-medium text-slate-500">{uploadingMedia ? "Uploading..." : `${wordCount} words`}</span> : null}
       </div>
+      {mediaError ? <div className="border-b border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{mediaError}</div> : null}
       <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => handleImageSelection(event.target.files?.[0])} />
       <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(event) => handleVideoSelection(event.target.files?.[0])} />
       {!compact && selectedMediaElement ? (
@@ -1474,6 +1546,14 @@ function loadImage(url: string) {
     image.onerror = reject;
     image.src = url;
   });
+}
+
+async function fileFromDataUrl(dataUrl: string, fallbackName: string) {
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+  const extension = blob.type.split("/")[1]?.split("+")[0] || "png";
+  const baseName = fallbackName.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "pasted-image";
+  return new File([blob], `${baseName}.${extension}`, { type: blob.type || "image/png" });
 }
 
 function cropDimensions(ratio: string) {

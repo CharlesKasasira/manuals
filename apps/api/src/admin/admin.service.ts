@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { PermissionAction, Role } from "@prisma/client";
+import { PermissionAction, Prisma, Role } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
 import { existsSync, readFileSync } from "fs";
@@ -10,7 +10,92 @@ import { join } from "path";
 import { AuditService } from "../common/audit.service";
 import { MailService } from "../mail/mail.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { AddTeamMemberDto, CreateApiKeyDto, CreatePermissionDto, CreateTeamDto, CreateUserDto, MailSettingsDto, SendTestEmailDto, UpdateTeamDto, UpdateUserDto } from "./admin.dto";
+import { AddTeamMemberDto, AnalyticsSettingsDto, CreateApiKeyDto, CreatePermissionDto, CreateTeamDto, CreateUserDto, MailSettingsDto, SendTestEmailDto, UpdateTeamDto, UpdateUserDto } from "./admin.dto";
+
+const defaultAuthStrategies = {
+  local: {
+    id: "local",
+    type: "local",
+    displayName: "Local",
+    enabled: true,
+    selfRegistration: false,
+    emailDomains: "",
+    assignRole: Role.user
+  },
+  ldap: {
+    id: "ldap",
+    type: "ldap",
+    displayName: "LDAP / Active Directory",
+    enabled: false,
+    url: "",
+    bindDn: "",
+    bindCredentials: "",
+    searchBase: "",
+    searchFilter: "(uid={{username}})",
+    useTls: false,
+    verifyTls: true,
+    tlsCertificatePath: "",
+    uniqueIdField: "uid",
+    emailField: "mail",
+    displayNameField: "displayName",
+    mapGroups: false,
+    groupSearchBase: "",
+    groupSearchFilter: "(member={{dn}})",
+    groupNameField: "name",
+    selfRegistration: false,
+    emailDomains: "",
+    assignRole: Role.user
+  },
+  keycloak: {
+    id: "keycloak",
+    type: "keycloak",
+    displayName: "Keycloak",
+    enabled: false,
+    issuer: "",
+    clientId: "",
+    clientSecret: "",
+    redirectUri: "",
+    scopes: "openid email profile",
+    autoProvision: true,
+    assignRole: Role.user,
+    emailDomains: ""
+  },
+  saml: {
+    id: "saml",
+    type: "saml",
+    displayName: "SAML 2.0",
+    enabled: false,
+    entryPoint: "",
+    issuer: "",
+    audience: "",
+    certificate: "",
+    privateKey: "",
+    signatureAlgorithm: "sha1",
+    digestAlgorithm: "sha1",
+    nameIdFormat: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+    acceptedClockSkewMs: 0,
+    disableRequestedAuthnContext: false,
+    authnContext: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+    identifierFormat: "emailAddress",
+    providerName: "manuals",
+    skipRequestCompression: false,
+    uniqueIdField: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+    emailField: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    displayNameField: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
+    mapGroups: false,
+    groupField: "memberOf",
+    selfRegistration: false,
+    emailDomains: "",
+    assignRole: Role.user
+  }
+};
+
+const defaultAnalyticsSettings = {
+  googleAnalyticsEnabled: false,
+  googleAnalyticsMeasurementId: "",
+  googleTagManagerEnabled: false,
+  googleTagManagerContainerId: ""
+};
 
 @Injectable()
 export class AdminService {
@@ -82,6 +167,85 @@ export class AdminService {
         configurationFile: this.config.get("CONFIG_FILE") ?? null
       }
     };
+  }
+
+  async authStrategies() {
+    const row = await this.prisma.systemSetting.findUnique({ where: { key: "auth.strategies" } });
+    return this.mergeAuthStrategies(row?.value);
+  }
+
+  async updateAuthStrategies(actorId: string, value: unknown) {
+    const strategies = this.mergeAuthStrategies(value);
+    await this.prisma.systemSetting.upsert({
+      where: { key: "auth.strategies" },
+      update: { value: strategies as Prisma.InputJsonValue },
+      create: { key: "auth.strategies", value: strategies as Prisma.InputJsonValue }
+    });
+    await this.audit.record({ event: "auth_settings_updated", actorId, entityType: "system_setting", entityId: "auth.strategies" });
+    return strategies;
+  }
+
+  async analyticsSettings() {
+    const row = await this.prisma.systemSetting.findUnique({ where: { key: "analytics.providers" } });
+    return this.mergeAnalyticsSettings(row?.value);
+  }
+
+  async updateAnalyticsSettings(actorId: string, dto: AnalyticsSettingsDto) {
+    const settings = this.mergeAnalyticsSettings(dto);
+    await this.prisma.systemSetting.upsert({
+      where: { key: "analytics.providers" },
+      update: { value: settings },
+      create: { key: "analytics.providers", value: settings }
+    });
+    await this.audit.record({ event: "analytics_settings_updated", actorId, entityType: "system_setting", entityId: "analytics.providers" });
+    return settings;
+  }
+
+  mergeAnalyticsSettings(value: unknown) {
+    const incoming = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const measurementId = typeof incoming.googleAnalyticsMeasurementId === "string" ? incoming.googleAnalyticsMeasurementId.trim() : "";
+    const containerId = typeof incoming.googleTagManagerContainerId === "string" ? incoming.googleTagManagerContainerId.trim() : "";
+    return {
+      ...defaultAnalyticsSettings,
+      googleAnalyticsEnabled: Boolean(incoming.googleAnalyticsEnabled) && /^G-[A-Z0-9]+$/i.test(measurementId),
+      googleAnalyticsMeasurementId: measurementId,
+      googleTagManagerEnabled: Boolean(incoming.googleTagManagerEnabled) && /^GTM-[A-Z0-9]+$/i.test(containerId),
+      googleTagManagerContainerId: containerId
+    };
+  }
+
+  mergeAuthStrategies(value: unknown) {
+    const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const merged: Record<string, Record<string, unknown>> = {};
+
+    for (const [key, defaults] of Object.entries(defaultAuthStrategies)) {
+      const incoming = raw[key] && typeof raw[key] === "object" ? raw[key] as Record<string, unknown> : {};
+      merged[key] = { ...defaults, ...incoming, id: defaults.id, type: defaults.type };
+    }
+
+    merged.local.enabled = true;
+    return merged;
+  }
+
+  comments() {
+    return this.prisma.pageComment.findMany({
+      include: {
+        author: { select: { id: true, name: true, email: true, role: true } },
+        assignedTo: { select: { id: true, name: true, email: true, role: true } },
+        resolvedBy: { select: { id: true, name: true, email: true, role: true } },
+        mentions: { include: { user: { select: { id: true, name: true, email: true, role: true } } } },
+        page: {
+          select: {
+            id: true,
+            title: true,
+            slug: true,
+            manual: { select: { id: true, title: true, slug: true, status: true, visibility: true } }
+          }
+        }
+      },
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      take: 300
+    });
   }
 
   users() {

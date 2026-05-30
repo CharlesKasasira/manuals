@@ -3,6 +3,7 @@ import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { AnalyticsScripts } from "@/components/providers/analytics-scripts";
 import { QuickSearch } from "@/components/search/quick-search";
 
 const inter = Inter({
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <QueryProvider>
             {children}
             <QuickSearch />
+            <AnalyticsScripts />
           </QueryProvider>
         </ThemeProvider>
       </body>

@@ -109,6 +109,52 @@ function RenderedManualContent({ html }: { html: string }) {
     };
   }, [html]);
 
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
+
+    const cleanups = images.map((image) => {
+      image.loading = image.loading || "lazy";
+      image.decoding = image.decoding || "async";
+      image.dataset.manualImageState = image.complete && image.naturalWidth > 0 ? "loaded" : "loading";
+      if (!image.hasAttribute("width") && !image.hasAttribute("height")) {
+        image.style.width = "100%";
+        image.style.aspectRatio = image.style.aspectRatio || "16 / 9";
+      }
+
+      const handleLoad = () => {
+        image.dataset.manualImageState = "loaded";
+        image.hidden = false;
+        const placeholder = image.nextElementSibling;
+        if (placeholder?.classList.contains("manual-missing-image")) placeholder.remove();
+      };
+      const handleError = () => {
+        image.dataset.manualImageState = "missing";
+        image.setAttribute("role", "img");
+        image.setAttribute("aria-label", `Missing image: ${image.currentSrc || image.src}`);
+        if (!image.nextElementSibling?.classList.contains("manual-missing-image")) {
+          const placeholder = document.createElement("div");
+          placeholder.className = "manual-missing-image";
+          placeholder.textContent = "Image unavailable";
+          image.after(placeholder);
+        }
+        image.hidden = true;
+      };
+
+      image.addEventListener("load", handleLoad);
+      image.addEventListener("error", handleError);
+      if (image.complete && image.naturalWidth === 0) handleError();
+
+      return () => {
+        image.removeEventListener("load", handleLoad);
+        image.removeEventListener("error", handleError);
+      };
+    });
+
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [html]);
+
   async function handleCodeCopy(event: React.MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement | null;
     const button = target?.closest<HTMLButtonElement>("[data-manual-code-copy]");
@@ -168,8 +214,8 @@ function PageSection({ page, onCopy }: { page: ManualPage; onCopy: (hash: string
 export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: boolean }) {
   const [query, setQuery] = useState("");
   const [activePageSlug, setActivePageSlug] = useState("");
-  const [progress, setProgress] = useState(0);
   const [copyMessage, setCopyMessage] = useState("");
+  const progressBarRef = useRef<HTMLDivElement>(null);
   const pages = useMemo(() => flatten(manual.tableOfContents ?? manual.pages ?? []), [manual.pages, manual.tableOfContents]);
   const normalizedQuery = query.trim().toLowerCase();
   const visiblePages = useMemo(() => {
@@ -186,10 +232,16 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
   const showAuthenticatedDetails = app;
 
   useEffect(() => {
+    let frame = 0;
+
     function updateProgress() {
-      const scrollTop = window.scrollY;
-      const scrollable = document.documentElement.scrollHeight - window.innerHeight;
-      setProgress(scrollable > 0 ? Math.min(100, Math.max(0, Math.round((scrollTop / scrollable) * 100))) : 0);
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const scrollTop = window.scrollY;
+        const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+        const progress = scrollable > 0 ? Math.min(1, Math.max(0, scrollTop / scrollable)) : 0;
+        if (progressBarRef.current) progressBarRef.current.style.transform = `scaleX(${progress})`;
+      });
     }
 
     updateProgress();
@@ -198,6 +250,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
     return () => {
       window.removeEventListener("scroll", updateProgress);
       window.removeEventListener("resize", updateProgress);
+      window.cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -210,7 +263,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
       const slug = visible?.target.id.replace(/^page-/, "");
-      if (slug) setActivePageSlug(slug);
+      if (slug) setActivePageSlug((current) => current === slug ? current : slug);
     }, { rootMargin: "-20% 0px -65% 0px", threshold: [0.05, 0.2, 0.5] });
 
     sections.forEach((section) => observer.observe(section));
@@ -275,7 +328,7 @@ export function ReaderLayout({ manual, app = false }: { manual: Manual; app?: bo
       </div>
       <div className="reader-shell grid gap-5 lg:grid-cols-[270px_minmax(0,1fr)]">
         <div className="fixed inset-x-0 top-0 z-40 h-1 bg-transparent print:hidden" aria-hidden="true">
-          <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${progress}%` }} />
+          <div ref={progressBarRef} className="h-full origin-left scale-x-0 bg-emerald-500 will-change-transform" />
         </div>
         <aside className="hidden lg:block">
         <div className="reader-sidebar sticky top-24 rounded-lg border border-line bg-white p-4 shadow-sm">

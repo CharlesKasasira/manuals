@@ -38,6 +38,9 @@ const nav: NavItem[] = [
       { href: "/app/admin/api-keys", label: "API keys" },
       { href: "/app/admin/mail", label: "Email" },
       { href: "/app/admin/audit", label: "Audit" },
+      { href: "/app/admin/comments", label: "Comments" },
+      { href: "/app/admin/auth", label: "Authentication" },
+      { href: "/app/admin/analytics", label: "Analytics" },
       { href: "/app/admin/system", label: "System Info" }
     ]
   }

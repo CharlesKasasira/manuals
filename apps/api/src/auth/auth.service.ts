@@ -57,8 +57,8 @@ export class AuthService {
     return { token, user: this.serializeUser(user) };
   }
 
-  ssoProviders(): SsoProviderSummary[] {
-    return this.oidcProviders().map((provider) => ({
+  async ssoProviders(): Promise<SsoProviderSummary[]> {
+    return (await this.oidcProviders()).map((provider) => ({
       id: provider.id,
       label: provider.label,
       type: provider.type,
@@ -67,7 +67,7 @@ export class AuthService {
   }
 
   async ssoStart(providerId: string, next = "/app") {
-    const provider = this.requireOidcProvider(providerId);
+    const provider = await this.requireOidcProvider(providerId);
     const state = await this.jwt.signAsync(
       {
         purpose: "sso",
@@ -91,7 +91,7 @@ export class AuthService {
   }
 
   async ssoCallback(providerId: string, code: string, state: string, ipAddress?: string) {
-    const provider = this.requireOidcProvider(providerId);
+    const provider = await this.requireOidcProvider(providerId);
     const statePayload = await this.jwt.verifyAsync(state, {
       secret: this.config.get<string>("JWT_SECRET", "manualflow-dev-secret")
     }).catch(() => null) as { purpose?: string; provider?: string; next?: string } | null;
@@ -236,15 +236,36 @@ export class AuthService {
     );
   }
 
-  private oidcProviders(): OidcProviderConfig[] {
+  private async oidcProviders(): Promise<OidcProviderConfig[]> {
+    const providers: OidcProviderConfig[] = [];
+    const setting = await this.prisma.systemSetting?.findUnique?.({ where: { key: "auth.strategies" } });
+    const strategies = setting?.value && typeof setting.value === "object" ? setting.value as Record<string, Record<string, unknown>> : {};
+    const keycloak = strategies.keycloak;
+    if (keycloak?.enabled && keycloak.issuer && keycloak.clientId && keycloak.clientSecret && keycloak.redirectUri) {
+      const provider = this.normalizeOidcProvider({
+        id: "keycloak",
+        label: String(keycloak.displayName || "Keycloak"),
+        type: "oidc",
+        issuer: String(keycloak.issuer),
+        clientId: String(keycloak.clientId),
+        clientSecret: String(keycloak.clientSecret),
+        redirectUri: String(keycloak.redirectUri),
+        scopes: typeof keycloak.scopes === "string" ? keycloak.scopes.split(/\s+/).filter(Boolean) : undefined,
+        role: Object.values(Role).includes(keycloak.assignRole as Role) ? keycloak.assignRole as Role : Role.user,
+        autoProvision: keycloak.autoProvision !== false
+      });
+      if (provider) providers.push(provider);
+    }
+
     const raw = this.config.get<string>("SSO_OIDC_PROVIDERS");
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as Array<Partial<OidcProviderConfig>> | Record<string, Partial<OidcProviderConfig>>;
         const values = Array.isArray(parsed) ? parsed : Object.entries(parsed).map(([id, value]) => ({ id, ...value }));
-        return values.map((provider) => this.normalizeOidcProvider(provider)).filter((provider): provider is OidcProviderConfig => Boolean(provider));
+        providers.push(...values.map((provider) => this.normalizeOidcProvider(provider)).filter((provider): provider is OidcProviderConfig => Boolean(provider)));
+        return providers;
       } catch {
-        return [];
+        return providers;
       }
     }
 
@@ -252,8 +273,8 @@ export class AuthService {
     const clientId = this.config.get<string>("SSO_OIDC_CLIENT_ID");
     const clientSecret = this.config.get<string>("SSO_OIDC_CLIENT_SECRET");
     const redirectUri = this.config.get<string>("SSO_OIDC_REDIRECT_URI");
-    if (!issuer || !clientId || !clientSecret || !redirectUri) return [];
-    return [this.normalizeOidcProvider({
+    if (!issuer || !clientId || !clientSecret || !redirectUri) return providers;
+    const provider = this.normalizeOidcProvider({
       id: this.config.get<string>("SSO_OIDC_ID", "oidc"),
       label: this.config.get<string>("SSO_OIDC_LABEL", "Single Sign-On"),
       type: "oidc",
@@ -262,7 +283,9 @@ export class AuthService {
       clientSecret,
       redirectUri,
       role: this.config.get<Role>("SSO_OIDC_DEFAULT_ROLE", Role.user)
-    })].filter((provider): provider is OidcProviderConfig => Boolean(provider));
+    });
+    if (provider) providers.push(provider);
+    return providers;
   }
 
   private normalizeOidcProvider(provider: Partial<OidcProviderConfig>): OidcProviderConfig | null {
@@ -284,8 +307,8 @@ export class AuthService {
     };
   }
 
-  private requireOidcProvider(providerId: string) {
-    const provider = this.oidcProviders().find((item) => item.id === providerId);
+  private async requireOidcProvider(providerId: string) {
+    const provider = (await this.oidcProviders()).find((item) => item.id === providerId);
     if (!provider) throw new BadRequestException("SSO provider is not configured.");
     return provider;
   }

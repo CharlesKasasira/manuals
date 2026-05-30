@@ -14,7 +14,7 @@ describe("visibleNavItemsForRole", () => {
     const adminItem = visibleNavItemsForRole("admin").find((item) => item.label === "Admin");
 
     expect(adminItem).toBeDefined();
-    expect(adminItem?.children?.map((item) => item.label)).toEqual(["Users", "Groups", "Permissions", "API keys", "Email", "Audit", "System Info"]);
+    expect(adminItem?.children?.map((item) => item.label)).toEqual(["Users", "Groups", "Permissions", "API keys", "Email", "Audit", "Comments", "Authentication", "Analytics", "System Info"]);
   });
 
   it("hides restricted routes until the current user is known", () => {

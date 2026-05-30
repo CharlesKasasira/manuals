@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/commo
 import { Role } from "@prisma/client";
 import { CurrentUser } from "../common/current-user.decorator";
 import { Roles } from "../common/roles.decorator";
-import { AddTeamMemberDto, CreateApiKeyDto, CreatePermissionDto, CreateTeamDto, CreateUserDto, MailSettingsDto, SendTestEmailDto, UpdateTeamDto, UpdateUserDto } from "./admin.dto";
+import { AddTeamMemberDto, AnalyticsSettingsDto, AuthStrategiesDto, CreateApiKeyDto, CreatePermissionDto, CreateTeamDto, CreateUserDto, MailSettingsDto, SendTestEmailDto, UpdateTeamDto, UpdateUserDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 
 @Roles(Role.admin)
@@ -18,6 +18,31 @@ export class AdminController {
   @Get("system")
   systemInfo() {
     return this.wrap(this.admin.systemInfo());
+  }
+
+  @Get("comments")
+  comments() {
+    return this.wrap(this.admin.comments());
+  }
+
+  @Get("auth/strategies")
+  authStrategies() {
+    return this.wrap(this.admin.authStrategies());
+  }
+
+  @Patch("auth/strategies")
+  updateAuthStrategies(@CurrentUser() actor: any, @Body() dto: AuthStrategiesDto) {
+    return this.wrap(this.admin.updateAuthStrategies(actor.id, dto.strategies));
+  }
+
+  @Get("analytics-settings")
+  analyticsSettings() {
+    return this.wrap(this.admin.analyticsSettings());
+  }
+
+  @Patch("analytics-settings")
+  updateAnalyticsSettings(@CurrentUser() actor: any, @Body() dto: AnalyticsSettingsDto) {
+    return this.wrap(this.admin.updateAnalyticsSettings(actor.id, dto));
   }
 
   @Get("roles")

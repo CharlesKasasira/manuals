@@ -1,23 +1,23 @@
 "use client";
 
 import type React from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
-import { BookOpen, Check, Copy, Cpu, Database, Filter, HardDrive, KeyRound, Layers3, Mail, Plus, Power, PowerOff, RotateCw, Send, Server, ShieldCheck, Trash2, UserCheck, UserCog, UserX, Users } from "lucide-react";
+import { BarChart3, BookOpen, Check, Copy, Cpu, Database, Filter, HardDrive, KeyRound, Layers3, LockKeyhole, Mail, MessageSquareText, Plus, Power, PowerOff, RotateCw, Send, Server, ShieldCheck, Tag, Trash2, UserCheck, UserCog, UserX, Users } from "lucide-react";
 import Link from "next/link";
 import type { Route } from "next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { api, setToken } from "@/lib/api";
-import type { AdminOverview, AdminSystemInfo, AdminUser, ApiKey, PermissionAction, Role, Team } from "@/lib/types";
+import type { AdminOverview, AdminSystemInfo, AdminUser, AnalyticsSettings, ApiKey, PageComment, PageCommentKind, PageCommentStatus, PermissionAction, Role, Team } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
-export type AdminSection = "overview" | "users" | "teams" | "permissions" | "api-keys" | "mail" | "audit" | "system";
+export type AdminSection = "overview" | "users" | "teams" | "permissions" | "api-keys" | "mail" | "audit" | "system" | "comments" | "auth" | "analytics";
 type Tab = Exclude<AdminSection, "overview">;
 type RunAction = (action: () => Promise<unknown>, success: string) => Promise<unknown>;
-const adminTabs: Tab[] = ["users", "teams", "permissions", "api-keys", "mail", "audit", "system"];
+const adminTabs: Tab[] = ["users", "teams", "permissions", "api-keys", "mail", "audit", "comments", "auth", "analytics", "system"];
 const tabLabels: Record<Tab, string> = {
   users: "Users",
   teams: "Groups",
@@ -25,8 +25,14 @@ const tabLabels: Record<Tab, string> = {
   "api-keys": "API keys",
   mail: "Email",
   audit: "Audit",
+  comments: "Comments",
+  auth: "Authentication",
+  analytics: "Analytics",
   system: "System Info"
 };
+
+type AuthStrategyKey = "local" | "ldap" | "keycloak" | "saml";
+type AuthStrategies = Record<AuthStrategyKey, Record<string, string | boolean | number>>;
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md border border-dashed border-line bg-slate-50 p-5 text-sm text-slate-500">{children}</div>;
@@ -104,6 +110,9 @@ export function AdminManagementPanel({ section = "overview" }: { section?: Admin
           <ControlCenterCard title="Integrations" description="Manage automation credentials and API access for connected systems." value={`${data.apiAccess.keys.length} keys`} icon={KeyRound} href="/app/admin/api-keys" />
           <ControlCenterCard title="Email" description="Configure outbound mail for resets, reviews, and notifications." value={data.mailSettings.configured ? "Configured" : "Not configured"} icon={Mail} href="/app/admin/mail" />
           <ControlCenterCard title="Audit trail" description="Review administrative and content governance events." value={`${data.auditLogs.length} events`} icon={ShieldCheck} href="/app/admin/audit" />
+          <ControlCenterCard title="Comments" description="Review page comments, reviewer notes, and change requests across manuals." value="Central feed" icon={MessageSquareText} href="/app/admin/comments" />
+          <ControlCenterCard title="Authentication" description="Configure local login, LDAP, Keycloak, and SAML sign-in strategies." value="Strategies" icon={LockKeyhole} href="/app/admin/auth" />
+          <ControlCenterCard title="Analytics" description="Configure Google Analytics and Google Tag Manager tracking." value="Providers" icon={BarChart3} href="/app/admin/analytics" />
           <ControlCenterCard title="System Info" description="Inspect application, runtime, database, and host information." value={data.mailSettings.configured ? "Ready" : "Review"} icon={Server} href="/app/admin/system" />
           <ControlCenterCard title="Spaces" description="Track the content spaces available for manuals and permission scopes." value={`${data.spaces.length} spaces`} icon={Layers3} />
           <ControlCenterCard title="Content estate" description="Monitor manuals governed by this workspace." value={`${data.manuals.length} manuals`} icon={BookOpen} />
@@ -129,6 +138,9 @@ export function AdminManagementPanel({ section = "overview" }: { section?: Admin
       {section === "api-keys" ? <ApiKeysAdmin data={data} run={run} /> : null}
       {section === "mail" ? <MailAdmin data={data} run={run} /> : null}
       {section === "audit" ? <AuditAdmin data={data} /> : null}
+      {section === "comments" ? <CommentsAdmin /> : null}
+      {section === "auth" ? <AuthStrategiesAdmin /> : null}
+      {section === "analytics" ? <AnalyticsSettingsAdmin /> : null}
       {section === "system" ? <SystemInfoAdmin /> : null}
     </div>
   );
@@ -190,6 +202,465 @@ function ControlCenterCard({
   }
 
   return <div className="grid min-h-40 gap-4 rounded-lg border border-line bg-white p-4 shadow-sm">{content}</div>;
+}
+
+function CommentsAdmin() {
+  const [status, setStatus] = useState<"all" | PageCommentStatus>("open");
+  const [kind, setKind] = useState<"all" | PageCommentKind>("all");
+  const [query, setQuery] = useState("");
+  const comments = useQuery({
+    queryKey: ["admin", "comments"],
+    queryFn: async () => (await api<{ data: PageComment[] }>("/admin/comments")).data,
+    retry: false
+  });
+
+  if (comments.isLoading) return <EmptyState>Loading comments...</EmptyState>;
+  if (comments.isError || !comments.data) return <ErrorState>Comments require an admin account and a running API.</ErrorState>;
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = comments.data.filter((comment) => {
+    if (status !== "all" && comment.status !== status) return false;
+    if (kind !== "all" && comment.kind !== kind) return false;
+    if (!normalizedQuery) return true;
+    return [
+      comment.body,
+      comment.author?.name,
+      comment.assignedTo?.name,
+      comment.page?.title,
+      comment.page?.manual?.title
+    ].filter(Boolean).join(" ").toLowerCase().includes(normalizedQuery);
+  });
+  const openCount = comments.data.filter((comment) => comment.status === "open").length;
+  const changeRequests = comments.data.filter((comment) => comment.kind === "change_request" && comment.status === "open").length;
+
+  async function updateComment(comment: PageComment, nextStatus: PageCommentStatus) {
+    if (!comment.pageId) return;
+    await api(`/pages/${comment.pageId}/comments/${comment.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: nextStatus })
+    });
+    await comments.refetch();
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Metric label="Total comments" value={comments.data.length} icon={MessageSquareText} />
+        <Metric label="Open" value={openCount} icon={MessageSquareText} />
+        <Metric label="Open changes" value={changeRequests} icon={ShieldCheck} />
+      </div>
+
+      <Card>
+        <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_190px]">
+          <input value={query} onChange={(event) => setQuery(event.target.value)} className="h-10 rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" placeholder="Search comments, manuals, pages, or people" />
+          <select value={status} onChange={(event) => setStatus(event.target.value as "all" | PageCommentStatus)} className="h-10 rounded-md border border-line bg-white px-3 text-sm">
+            <option value="all">All statuses</option>
+            <option value="open">Open</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <select value={kind} onChange={(event) => setKind(event.target.value as "all" | PageCommentKind)} className="h-10 rounded-md border border-line bg-white px-3 text-sm">
+            <option value="all">All comment types</option>
+            <option value="comment">Comment</option>
+            <option value="reviewer_note">Reviewer note</option>
+            <option value="change_request">Change request</option>
+          </select>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-3">
+        {filtered.length ? filtered.map((comment) => {
+          const manual = comment.page?.manual;
+          const href = manual?.slug ? `/app/manuals/${manual.slug}/reader${comment.page?.slug ? `#page-${comment.page.slug}` : ""}` : null;
+          return (
+            <Card key={comment.id}>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap gap-2">
+                      <Badge value={comment.kind} />
+                      <Badge value={comment.status} />
+                      {manual?.visibility ? <Badge value={manual.visibility} /> : null}
+                    </div>
+                    <h2 className="mt-3 text-base font-semibold text-slate-950">{manual?.title ?? "Unknown manual"}</h2>
+                    <p className="mt-1 text-sm text-slate-500">{comment.page?.title ? `Page: ${comment.page.title}` : "Page context unavailable"}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {href ? (
+                      <Link href={href as Route} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        Open page
+                      </Link>
+                    ) : null}
+                    <Button type="button" variant="secondary" onClick={() => updateComment(comment, comment.status === "open" ? "resolved" : "open")}>
+                      {comment.status === "open" ? "Resolve" : "Reopen"}
+                    </Button>
+                  </div>
+                </div>
+                <p className="rounded-md border border-line bg-slate-50 p-3 text-sm leading-6 text-slate-700">{comment.body}</p>
+                <div className="grid gap-2 text-xs text-slate-500 md:grid-cols-2">
+                  <p>Author: {comment.author?.name ?? "Unknown"} / {formatDate(comment.createdAt)}</p>
+                  {comment.assignedTo ? <p>Owner: {comment.assignedTo.name}</p> : <p>Owner: Unassigned</p>}
+                  {comment.sectionAnchor ? <p>Section: {comment.sectionAnchor}</p> : null}
+                  {comment.resolvedBy ? <p>Resolved by: {comment.resolvedBy.name}</p> : null}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        }) : <EmptyState>No comments match these filters.</EmptyState>}
+      </div>
+    </div>
+  );
+}
+
+function AuthStrategiesAdmin() {
+  const [selected, setSelected] = useState<AuthStrategyKey>("local");
+  const [draft, setDraft] = useState<AuthStrategies | null>(null);
+  const [message, setMessage] = useState("");
+  const strategies = useQuery({
+    queryKey: ["admin", "auth", "strategies"],
+    queryFn: async () => (await api<{ data: AuthStrategies }>("/admin/auth/strategies")).data,
+    retry: false
+  });
+
+  useEffect(() => {
+    if (strategies.data) setDraft(strategies.data);
+  }, [strategies.data]);
+
+  if (strategies.isLoading || !draft) return <EmptyState>Loading authentication strategies...</EmptyState>;
+  if (strategies.isError) return <ErrorState>Authentication settings require an admin account and a running API.</ErrorState>;
+
+  const current = draft[selected];
+  const strategyList: Array<{ key: AuthStrategyKey; title: string; subtitle: string }> = [
+    { key: "local", title: "Local", subtitle: "Local Database" },
+    { key: "ldap", title: "LDAP / Active Directory", subtitle: "Directory bind and search" },
+    { key: "keycloak", title: "Keycloak", subtitle: "OpenID Connect" },
+    { key: "saml", title: "SAML 2.0", subtitle: "SAML identity provider" }
+  ];
+
+  function update(field: string, value: string | boolean | number) {
+    setDraft((valueByStrategy) => valueByStrategy ? {
+      ...valueByStrategy,
+      [selected]: { ...valueByStrategy[selected], [field]: value }
+    } : valueByStrategy);
+  }
+
+  async function save() {
+    setMessage("");
+    const response = await api<{ data: AuthStrategies }>("/admin/auth/strategies", {
+      method: "PATCH",
+      body: JSON.stringify({ strategies: draft })
+    });
+    setDraft(response.data);
+    await strategies.refetch();
+    setMessage("Authentication strategies saved.");
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Authentication</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Authentication</h2>
+          <p className="mt-1 text-sm text-slate-600">Configure login strategies for local accounts and external identity providers.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {message ? <span className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</span> : null}
+          <Button type="button" onClick={save}><Check size={16} />Apply</Button>
+        </div>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <Card>
+          <CardHeader><div className="text-sm font-semibold text-slate-950">Active Strategies</div></CardHeader>
+          <CardContent className="space-y-2">
+            {strategyList.map((strategy) => {
+              const enabled = Boolean(draft[strategy.key]?.enabled);
+              const active = selected === strategy.key;
+              return (
+                <button
+                  key={strategy.key}
+                  type="button"
+                  onClick={() => setSelected(strategy.key)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-md border px-3 py-3 text-left transition ${active ? "border-emerald-200 bg-emerald-50" : "border-line bg-white hover:bg-slate-50"}`}
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-950">{String(draft[strategy.key]?.displayName || strategy.title)}</span>
+                    <span className="block text-xs text-slate-500">{strategy.subtitle}</span>
+                  </span>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{enabled ? "Active" : "Off"}</span>
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-slate-950">{String(current.displayName)}</h3>
+                <p className="mt-1 text-sm text-slate-500">{authStrategyDescription(selected)}</p>
+              </div>
+              <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <input type="checkbox" checked={selected === "local" || Boolean(current.enabled)} disabled={selected === "local"} onChange={(event) => update("enabled", event.target.checked)} />
+                Active
+              </label>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+              <TextField label="Display Name" value={String(current.displayName ?? "")} onChange={(value) => update("displayName", value)} />
+              <SelectField label="Assign Role" value={String(current.assignRole ?? "user")} onChange={(value) => update("assignRole", value)} options={["user", "manager", "admin"]} />
+            </div>
+
+            {selected === "local" ? <LocalAuthFields strategy={current} update={update} /> : null}
+            {selected === "ldap" ? <LdapAuthFields strategy={current} update={update} /> : null}
+            {selected === "keycloak" ? <KeycloakAuthFields strategy={current} update={update} /> : null}
+            {selected === "saml" ? <SamlAuthFields strategy={current} update={update} /> : null}
+
+            <div className="border-t border-line pt-5">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Registration</p>
+              <div className="mt-4 space-y-4">
+                <ToggleField label="Allow self-registration" description="Allow users authorized by this strategy to access Manuals." checked={Boolean(current.selfRegistration)} onChange={(checked) => update("selfRegistration", checked)} />
+                <TextField label="Limit to specific email domains" value={String(current.emailDomains ?? "")} onChange={(value) => update("emailDomains", value)} placeholder="renu.ac.ug, example.org" help="Comma-separated domains allowed to register through this strategy." />
+              </div>
+            </div>
+
+            <div className="rounded-md border border-line bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-950">Configuration Reference</p>
+              <div className="mt-3 grid gap-3 text-sm text-slate-600 md:grid-cols-2">
+                <p><span className="font-semibold text-slate-800">Login URL:</span><br />/login</p>
+                <p><span className="font-semibold text-slate-800">Callback URL:</span><br />/auth/sso/{selected}/callback</p>
+                <p><span className="font-semibold text-slate-800">Allowed Origins:</span><br />Configured web origin</p>
+                <p><span className="font-semibold text-slate-800">Token Method:</span><br />HTTP-POST</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsSettingsAdmin() {
+  const [draft, setDraft] = useState<AnalyticsSettings | null>(null);
+  const [message, setMessage] = useState("");
+  const settings = useQuery({
+    queryKey: ["admin", "analytics-settings"],
+    queryFn: async () => (await api<{ data: AnalyticsSettings }>("/admin/analytics-settings")).data,
+    retry: false
+  });
+
+  useEffect(() => {
+    if (settings.data) setDraft(settings.data);
+  }, [settings.data]);
+
+  if (settings.isLoading || !draft) return <EmptyState>Loading analytics settings...</EmptyState>;
+  if (settings.isError) return <ErrorState>Analytics settings require an admin account and a running API.</ErrorState>;
+
+  function update<K extends keyof AnalyticsSettings>(key: K, value: AnalyticsSettings[K]) {
+    setDraft((current) => current ? { ...current, [key]: value } : current);
+  }
+
+  async function save() {
+    setMessage("");
+    const response = await api<{ data: AnalyticsSettings }>("/admin/analytics-settings", {
+      method: "PATCH",
+      body: JSON.stringify(draft)
+    });
+    setDraft(response.data);
+    await settings.refetch();
+    setMessage("Analytics settings saved.");
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Analytics</p>
+          <h2 className="mt-1 text-2xl font-semibold text-slate-950">Analytics Providers</h2>
+          <p className="mt-1 text-sm text-slate-600">Configure external analytics tags for the public Manuals experience.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {message ? <span className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</span> : null}
+          <Button type="button" onClick={save}><Check size={16} />Apply</Button>
+        </div>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <span className="rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-700"><BarChart3 size={18} /></span>
+              <div>
+                <h3 className="text-base font-semibold text-slate-950">Google Analytics</h3>
+                <p className="text-sm text-slate-500">Track page views using a GA4 Measurement ID.</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ToggleField label="Enable Google Analytics" description="Inject the Google Analytics gtag script into public pages." checked={draft.googleAnalyticsEnabled} onChange={(checked) => update("googleAnalyticsEnabled", checked)} />
+            <TextField label="Measurement ID" value={draft.googleAnalyticsMeasurementId} onChange={(value) => update("googleAnalyticsMeasurementId", value.trim().toUpperCase())} placeholder="G-XXXXXXXXXX" help="Use your GA4 Measurement ID. Settings only become active when this starts with G-." />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <span className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-emerald-700"><Tag size={18} /></span>
+              <div>
+                <h3 className="text-base font-semibold text-slate-950">Google Tag Manager</h3>
+                <p className="text-sm text-slate-500">Load a GTM container for tags and conversion scripts.</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ToggleField label="Enable Google Tag Manager" description="Inject the GTM script and noscript fallback into public pages." checked={draft.googleTagManagerEnabled} onChange={(checked) => update("googleTagManagerEnabled", checked)} />
+            <TextField label="Container ID" value={draft.googleTagManagerContainerId} onChange={(value) => update("googleTagManagerContainerId", value.trim().toUpperCase())} placeholder="GTM-XXXXXXX" help="Use your Google Tag Manager container ID. Settings only become active when this starts with GTM-." />
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader><div className="text-sm font-semibold text-slate-950">Configuration Reference</div></CardHeader>
+        <CardContent className="grid gap-3 text-sm text-slate-600 md:grid-cols-2">
+          <p><span className="font-semibold text-slate-800">Public endpoint:</span><br />/public/analytics-settings</p>
+          <p><span className="font-semibold text-slate-800">Google Analytics format:</span><br />G-XXXXXXXXXX</p>
+          <p><span className="font-semibold text-slate-800">Google Tag Manager format:</span><br />GTM-XXXXXXX</p>
+          <p><span className="font-semibold text-slate-800">Injection scope:</span><br />Public and app pages rendered by the web frontend.</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function authStrategyDescription(strategy: AuthStrategyKey) {
+  if (strategy === "local") return "Built-in username and password authentication.";
+  if (strategy === "ldap") return "Bind to LDAP or Active Directory and map directory attributes.";
+  if (strategy === "keycloak") return "Use Keycloak through OpenID Connect.";
+  return "Configure a SAML 2.0 identity provider.";
+}
+
+function TextField({ label, value, onChange, placeholder, help, type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; help?: string; type?: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="mt-1 h-10 w-full rounded-md border border-line px-3 text-sm outline-none focus:border-slate-400" />
+      {help ? <span className="mt-1 block text-xs text-slate-500">{help}</span> : null}
+    </label>
+  );
+}
+
+function TextAreaField({ label, value, onChange, placeholder, help }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; help?: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="mt-1 min-h-28 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-slate-400" />
+      {help ? <span className="mt-1 block text-xs text-slate-500">{help}</span> : null}
+    </label>
+  );
+}
+
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-line bg-white px-3 text-sm">
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function ToggleField({ label, description, checked, onChange }: { label: string; description: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-3">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-1" />
+      <span>
+        <span className="block text-sm font-semibold text-slate-800">{label}</span>
+        <span className="block text-sm text-slate-500">{description}</span>
+      </span>
+    </label>
+  );
+}
+
+function LocalAuthFields({ strategy, update }: { strategy: Record<string, string | boolean | number>; update: (field: string, value: string | boolean | number) => void }) {
+  return <ToggleField label="Password reset via email" description="Allow local users to request password reset links when mail is configured." checked={Boolean(strategy.passwordReset ?? true)} onChange={(checked) => update("passwordReset", checked)} />;
+}
+
+function LdapAuthFields({ strategy, update }: { strategy: Record<string, string | boolean | number>; update: (field: string, value: string | boolean | number) => void }) {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextField label="LDAP URL" value={String(strategy.url ?? "")} onChange={(value) => update("url", value)} placeholder="ldap://serverhost:389" />
+        <TextField label="Admin Bind DN" value={String(strategy.bindDn ?? "")} onChange={(value) => update("bindDn", value)} placeholder="cn=root" />
+        <TextField label="Admin Bind Credentials" value={String(strategy.bindCredentials ?? "")} onChange={(value) => update("bindCredentials", value)} type="password" />
+        <TextField label="Search Base" value={String(strategy.searchBase ?? "")} onChange={(value) => update("searchBase", value)} placeholder="ou=users,o=example.com" />
+        <TextField label="Search Filter" value={String(strategy.searchFilter ?? "")} onChange={(value) => update("searchFilter", value)} placeholder="(uid={{username}})" />
+        <TextField label="TLS Certificate Path" value={String(strategy.tlsCertificatePath ?? "")} onChange={(value) => update("tlsCertificatePath", value)} />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <ToggleField label="Use TLS" description="Connect using LDAPS or StartTLS." checked={Boolean(strategy.useTls)} onChange={(checked) => update("useTls", checked)} />
+        <ToggleField label="Verify TLS Certificate" description="Reject invalid directory TLS certificates." checked={Boolean(strategy.verifyTls)} onChange={(checked) => update("verifyTls", checked)} />
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <TextField label="Unique ID Field" value={String(strategy.uniqueIdField ?? "")} onChange={(value) => update("uniqueIdField", value)} />
+        <TextField label="Email Field" value={String(strategy.emailField ?? "")} onChange={(value) => update("emailField", value)} />
+        <TextField label="Display Name Field" value={String(strategy.displayNameField ?? "")} onChange={(value) => update("displayNameField", value)} />
+      </div>
+      <ToggleField label="Map Groups" description="Map directory groups into Manuals groups in a later sync step." checked={Boolean(strategy.mapGroups)} onChange={(checked) => update("mapGroups", checked)} />
+      <div className="grid gap-4 md:grid-cols-3">
+        <TextField label="Group Search Base" value={String(strategy.groupSearchBase ?? "")} onChange={(value) => update("groupSearchBase", value)} />
+        <TextField label="Group Search Filter" value={String(strategy.groupSearchFilter ?? "")} onChange={(value) => update("groupSearchFilter", value)} />
+        <TextField label="Group Name Field" value={String(strategy.groupNameField ?? "")} onChange={(value) => update("groupNameField", value)} />
+      </div>
+    </div>
+  );
+}
+
+function KeycloakAuthFields({ strategy, update }: { strategy: Record<string, string | boolean | number>; update: (field: string, value: string | boolean | number) => void }) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <TextField label="Issuer URL" value={String(strategy.issuer ?? "")} onChange={(value) => update("issuer", value)} placeholder="https://keycloak.example.com/realms/manuals" />
+      <TextField label="Client ID" value={String(strategy.clientId ?? "")} onChange={(value) => update("clientId", value)} />
+      <TextField label="Client Secret" value={String(strategy.clientSecret ?? "")} onChange={(value) => update("clientSecret", value)} type="password" />
+      <TextField label="Redirect URI" value={String(strategy.redirectUri ?? "")} onChange={(value) => update("redirectUri", value)} placeholder="https://manuals.example.com/auth/sso/keycloak/callback" />
+      <TextField label="Scopes" value={String(strategy.scopes ?? "")} onChange={(value) => update("scopes", value)} placeholder="openid email profile" />
+      <ToggleField label="Auto-provision users" description="Create local accounts when Keycloak returns a verified email." checked={Boolean(strategy.autoProvision)} onChange={(checked) => update("autoProvision", checked)} />
+    </div>
+  );
+}
+
+function SamlAuthFields({ strategy, update }: { strategy: Record<string, string | boolean | number>; update: (field: string, value: string | boolean | number) => void }) {
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextField label="Entry Point" value={String(strategy.entryPoint ?? "")} onChange={(value) => update("entryPoint", value)} />
+        <TextField label="Issuer" value={String(strategy.issuer ?? "")} onChange={(value) => update("issuer", value)} />
+        <TextField label="Audience" value={String(strategy.audience ?? "")} onChange={(value) => update("audience", value)} />
+        <TextField label="Provider Name" value={String(strategy.providerName ?? "")} onChange={(value) => update("providerName", value)} />
+      </div>
+      <TextAreaField label="Certificate" value={String(strategy.certificate ?? "")} onChange={(value) => update("certificate", value)} />
+      <TextAreaField label="Private Key" value={String(strategy.privateKey ?? "")} onChange={(value) => update("privateKey", value)} />
+      <div className="grid gap-4 md:grid-cols-3">
+        <SelectField label="Signature Algorithm" value={String(strategy.signatureAlgorithm ?? "sha1")} onChange={(value) => update("signatureAlgorithm", value)} options={["sha1", "sha256", "sha512"]} />
+        <SelectField label="Digest Algorithm" value={String(strategy.digestAlgorithm ?? "sha1")} onChange={(value) => update("digestAlgorithm", value)} options={["sha1", "sha256", "sha512"]} />
+        <TextField label="Accepted Clock Skew Milliseconds" value={String(strategy.acceptedClockSkewMs ?? 0)} onChange={(value) => update("acceptedClockSkewMs", Number(value) || 0)} type="number" />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <TextField label="NameID Format" value={String(strategy.nameIdFormat ?? "")} onChange={(value) => update("nameIdFormat", value)} />
+        <TextField label="Authn Context" value={String(strategy.authnContext ?? "")} onChange={(value) => update("authnContext", value)} />
+        <TextField label="Unique ID Field Mapping" value={String(strategy.uniqueIdField ?? "")} onChange={(value) => update("uniqueIdField", value)} />
+        <TextField label="Email Field Mapping" value={String(strategy.emailField ?? "")} onChange={(value) => update("emailField", value)} />
+        <TextField label="Display Name Field Mapping" value={String(strategy.displayNameField ?? "")} onChange={(value) => update("displayNameField", value)} />
+        <TextField label="Group Field Mapping" value={String(strategy.groupField ?? "")} onChange={(value) => update("groupField", value)} />
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <ToggleField label="Disable Requested Authn Context" description="Do not request a specific authentication context." checked={Boolean(strategy.disableRequestedAuthnContext)} onChange={(checked) => update("disableRequestedAuthnContext", checked)} />
+        <ToggleField label="Skip Request Compression" description="Send SAML requests without compression." checked={Boolean(strategy.skipRequestCompression)} onChange={(checked) => update("skipRequestCompression", checked)} />
+        <ToggleField label="Map Groups" description="Map SAML group attributes into Manuals groups." checked={Boolean(strategy.mapGroups)} onChange={(checked) => update("mapGroups", checked)} />
+      </div>
+    </div>
+  );
 }
 
 function SystemInfoAdmin() {

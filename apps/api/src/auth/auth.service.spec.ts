@@ -106,7 +106,7 @@ describe("AuthService", () => {
     }));
   });
 
-  it("lists configured OIDC SSO providers without exposing secrets", () => {
+  it("lists configured OIDC SSO providers without exposing secrets", async () => {
     const { service } = makeService({
       config: {
         SSO_OIDC_PROVIDERS: JSON.stringify({
@@ -121,7 +121,7 @@ describe("AuthService", () => {
       }
     });
 
-    expect(service.ssoProviders()).toEqual([{ id: "okta", label: "Okta", type: "oidc", enabled: true }]);
+    await expect(service.ssoProviders()).resolves.toEqual([{ id: "okta", label: "Okta", type: "oidc", enabled: true }]);
   });
 
   it("provisions verified OIDC users and issues a local session token", async () => {

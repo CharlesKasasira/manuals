@@ -3,15 +3,30 @@ import type { Response } from "express";
 import { Public } from "../common/public.decorator";
 import { ListManualsDto } from "../manuals/manuals.dto";
 import { ManualsService } from "../manuals/manuals.service";
+import { PrismaService } from "../prisma/prisma.service";
 
 @Public()
 @Controller("public")
 export class PublicController {
-  constructor(private readonly manuals: ManualsService) {}
+  constructor(private readonly manuals: ManualsService, private readonly prisma: PrismaService) {}
 
   @Get("manuals")
   async manualsList(@Query() query: ListManualsDto) {
     return { data: await this.manuals.publicList(query) };
+  }
+
+  @Get("analytics-settings")
+  async analyticsSettings() {
+    const row = await this.prisma.systemSetting.findUnique({ where: { key: "analytics.providers" } });
+    const value = row?.value && typeof row.value === "object" ? row.value as Record<string, unknown> : {};
+    const measurementId = typeof value.googleAnalyticsMeasurementId === "string" ? value.googleAnalyticsMeasurementId : "";
+    const containerId = typeof value.googleTagManagerContainerId === "string" ? value.googleTagManagerContainerId : "";
+    return {
+      data: {
+        googleAnalyticsMeasurementId: value.googleAnalyticsEnabled === true && /^G-[A-Z0-9]+$/i.test(measurementId) ? measurementId : "",
+        googleTagManagerContainerId: value.googleTagManagerEnabled === true && /^GTM-[A-Z0-9]+$/i.test(containerId) ? containerId : ""
+      }
+    };
   }
 
   @Get("manuals/:slug")
